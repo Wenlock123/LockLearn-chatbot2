@@ -7,6 +7,8 @@ import requests
 import re
 from sentence_transformers import SentenceTransformer
 
+# --- ไม่ต้อง patch pysqlite3 แล้วเพราะไม่ใช้ PersistentClient ---
+
 # --- ตั้งค่าหน้า Streamlit ---
 st.set_page_config(page_title="LockLearn Lifecoach", page_icon="💖", layout="centered")
 
@@ -19,9 +21,14 @@ if not os.path.exists(folder_path):
     gdown.download_folder(id=folder_id, quiet=False, use_cookies=False)
     st.success("✅ ดาวน์โหลดเรียบร้อยแล้ว!")
 
-# --- โหลด ChromaDB แบบ Persistent ---
-client = chromadb.PersistentClient(path=folder_path)
-collection = client.get_collection(name="recommendations")
+# --- โหลด ChromaDB แบบ in-memory (ไม่ใช้ persistent) ---
+client = chromadb.Client()
+
+# --- เช็คว่ามี collection "recommendations" หรือยัง ---
+try:
+    collection = client.get_collection(name="recommendations")
+except chromadb.errors.NotFoundError:
+    collection = client.create_collection(name="recommendations")
 
 # --- โหลด embedding model ---
 embedding_model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2')
