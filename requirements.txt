@@ -5,4 +5,4 @@ protobuf==3.20.3
 requests
 streamlit
 pysqlite3-binary==0.5.3.post1
-gdown
+gdown>=4.7.1
