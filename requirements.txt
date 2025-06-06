@@ -1,8 +1,8 @@
-torch==1.13.1
+streamlit
+gdown>=4.7.1
+requests
 sentence-transformers
+torch==2.0.1+cpu -f https://download.pytorch.org/whl/torch_stable.html
 chromadb
 protobuf==3.20.3
-requests
-streamlit
 pysqlite3-binary==0.5.3.post1
-gdown>=4.7.1
