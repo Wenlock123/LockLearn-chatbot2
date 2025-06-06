@@ -7,10 +7,6 @@ import requests
 import re
 from sentence_transformers import SentenceTransformer
 
-# --- โหลด sqlite3 patch สำหรับ Streamlit Cloud ---
-__import__('pysqlite3')
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-
 # --- ตั้งค่าหน้า Streamlit ---
 st.set_page_config(page_title="LockLearn Lifecoach", page_icon="💖", layout="centered")
 
