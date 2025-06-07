@@ -8,4 +8,5 @@ pysqlite3-binary==0.5.3.post1
 gdown>=4.7.1
 protobuf==3.20.3
 onnxruntime>=1.14.1
-together-python
+together-python==0.3.0
+
