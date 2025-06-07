@@ -6,6 +6,10 @@ from sentence_transformers import SentenceTransformer
 import together
 from dotenv import load_dotenv
 
+# --- Patch sqlite3 สำหรับ Streamlit Cloud ---
+__import__('pysqlite3')
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+
 # --- Load environment variables ---
 load_dotenv()
 together_api_key = os.getenv("TOGETHER_API_KEY")
