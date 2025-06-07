@@ -1,10 +1,10 @@
-streamlit                     
-torch==1.13.1                  
-sentence-transformers==2.2.2   
-huggingface_hub==0.13.3        
-chromadb==0.4.25         
-numpy==1.23.5                 
-protobuf==3.20.3              
-requests                       
-pysqlite3-binary==0.5.3.post1  
-gdown>=4.7.1                
+streamlit
+torch==1.13.1
+sentence-transformers==2.2.2
+huggingface_hub==0.13.3
+chromadb==0.4.19           # ใช้เวอร์ชันนี้เพื่อลองแก้ปัญหา schema
+numpy==1.23.5
+protobuf==3.20.3
+requests
+pysqlite3-binary==0.5.3.post1
+gdown>=4.7.1
