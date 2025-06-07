@@ -31,41 +31,27 @@ st.info("📦 กำลังดาวน์โหลดฐานข้อมู
 gdrive_file_id = "13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca"
 gdown.download(id=gdrive_file_id, output=zip_file_path, quiet=False, use_cookies=False)
 
-# แตก zip ไฟล์และแสดงโครงสร้างไฟล์ใน zip เพื่อ debug
+# แตก zip ไฟล์
 with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
-    st.write("Zip contents:", zip_ref.namelist())
     zip_ref.extractall(folder_path)
 
 # ลบไฟล์ zip หลังแตกไฟล์แล้ว
 os.remove(zip_file_path)
 
-# --- ตรวจสอบว่าใน folder_path มีโฟลเดอร์ซ้อนหรือไม่ ---
-folder_path_real = os.path.join(folder_path, "chromadb_database_v2")
-if os.path.exists(folder_path_real):
-    client_path = folder_path_real
-else:
-    client_path = folder_path
-
-st.write(f"Using ChromaDB path: {client_path}")
+st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
 
 # --- โหลด ChromaDB แบบ persistent client ---
 try:
-    client = PersistentClient(path=client_path)
+    client = PersistentClient(path=folder_path)
 except Exception as e:
     st.error(f"❌ ไม่สามารถโหลด ChromaDB ได้: {e}")
     st.stop()
 
-# --- แสดง collections ที่มีในฐานข้อมูล ---
-collections = client.list_collections()
-st.write("Collections in DB:", collections)
-
 # --- เช็คว่ามี collection "recommendations" หรือยัง ---
-collection_name = "recommendations"
 try:
-    collection = client.get_collection(name=collection_name)
-except Exception as e:
-    st.error(f"❌ ไม่พบ collection '{collection_name}': {e}")
-    st.stop()
+    collection = client.get_collection(name="recommendations")
+except Exception:
+    collection = client.create_collection(name="recommendations")
 
 # --- โหลด embedding model ---
 embedding_model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2')
@@ -96,18 +82,14 @@ def query_llm_with_chat(prompt, api_key):
     except Exception as e:
         return f"❌ Request failed: {e}"
 
-# --- ฟังก์ชันดึงคำแนะนำจาก ChromaDB พร้อมจับ error และ debug ---
+# --- ฟังก์ชันดึงคำแนะนำจาก ChromaDB ---
 def retrieve_recommendations(question_embedding, top_k=10):
-    try:
-        results = collection.query(
-            query_embeddings=[question_embedding],
-            n_results=top_k
-        )
-        st.write("Query results:", results)
-        if results and results.get('documents'):
-            return results['documents'][0]
-    except Exception as e:
-        st.error(f"Error querying ChromaDB: {e}")
+    results = collection.query(
+        query_embeddings=[question_embedding],
+        n_results=top_k
+    )
+    if results and results.get('documents'):
+        return results['documents'][0]
     return []
 
 # --- ฟังก์ชันตรวจข้อความปิดท้าย ---
@@ -170,7 +152,7 @@ if user_input:
         }[lang]
     else:
         with st.spinner("Thinking..."):
-            question_embedding = embedding_model.encode(user_input, normalize_embeddings=True).tolist()
+            question_embedding = embedding_model.encode(user_input).tolist()
             recommendations = retrieve_recommendations(question_embedding, top_k=10)
 
             prompt = f"""
