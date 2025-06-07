@@ -8,37 +8,36 @@ import zipfile
 import streamlit as st
 import requests
 
-# --- Patch sqlite3 สำหรับ Streamlit Cloud ---
+# --- Patch sqlite3 for Streamlit Cloud ---
 __import__('pysqlite3')
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 from chromadb import PersistentClient
 from sentence_transformers import SentenceTransformer
 
-# --- ตั้งค่าหน้า Streamlit ---
+# --- Streamlit page config ---
 st.set_page_config(page_title="LockLearn Lifecoach", page_icon="💖", layout="centered")
 
-# --- กำหนดชื่อไฟล์และโฟลเดอร์ ---
+# --- Define paths ---
 zip_file_path = "./chromadb_database_v2.zip"
 unpacked_folder_name = "chromadb_database_v2"
 
-# --- ลบโฟลเดอร์เดิม (ถ้ามี) เพื่อป้องกัน schema ไม่ตรงกัน ---
+# --- Clear old database folder to avoid schema mismatch ---
 if os.path.exists(unpacked_folder_name):
     shutil.rmtree(unpacked_folder_name)
 
-# --- ดาวน์โหลด ZIP จาก Google Drive ---
-st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำจาก Google Drive...")
-gdown.download(id="13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca", output=zip_file_path, quiet=False)
+# --- Download DB ZIP if not exists ---
+if not os.path.exists(unpacked_folder_name):
+    st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำจาก Google Drive...")
+    # เปลี่ยน id ให้ตรงกับไฟล์จริงของคุณ
+    gdown.download(id="13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca", output=zip_file_path, quiet=False)
+    # แตกไฟล์ ZIP
+    with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+        zip_ref.extractall(".")
+    os.remove(zip_file_path)
+    st.success("✅ ดาวน์โหลดและแตกไฟล์เรียบร้อยแล้ว!")
 
-# --- แตกไฟล์ ZIP ---
-with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
-    zip_ref.extractall(".")
-
-# --- ลบไฟล์ ZIP ---
-os.remove(zip_file_path)
-st.success("✅ ดาวน์โหลดและแตกไฟล์เรียบร้อยแล้ว!")
-
-# --- โหลด ChromaDB ---
+# --- Load ChromaDB persistent client ---
 try:
     client = PersistentClient(path=unpacked_folder_name)
     collection = client.get_collection(name="recommendations")
@@ -46,13 +45,13 @@ except Exception as e:
     st.error(f"❌ ไม่สามารถโหลด ChromaDB ได้: {e}")
     st.stop()
 
-# --- โหลด embedding model ---
+# --- Load embedding model ---
 embedding_model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2')
 
-# --- โหลด API key ---
+# --- Load API key ---
 api_key = st.secrets["TOGETHER_API_KEY"]
 
-# --- ฟังก์ชันเรียก LLaMA 4 Scout ---
+# --- Function to call LLaMA 4 Scout API ---
 def query_llm_with_chat(prompt, api_key):
     url = "https://api.together.xyz/v1/chat/completions"
     headers = {
@@ -75,12 +74,14 @@ def query_llm_with_chat(prompt, api_key):
     except Exception as e:
         return f"❌ Request failed: {e}"
 
-# --- ฟังก์ชันดึงคำแนะนำ ---
+# --- Retrieve recommendations by embedding ---
 def retrieve_recommendations(question_embedding, top_k=10):
     results = collection.query(query_embeddings=[question_embedding], n_results=top_k)
-    return results['documents'][0] if results and results.get('documents') else []
+    if results and results.get('documents'):
+        return results['documents'][0]
+    return []
 
-# --- ตรวจข้อความปิดท้าย ---
+# --- Check if message is closing phrase ---
 def is_closing_message(text):
     closing_patterns = [
         r"^ขอบคุณ.*", r"^ขอบใจ.*", r"^โอเค.*", r"^เข้าใจ.*", r"^ได้เลย.*", r"^รับทราบ.*",
@@ -91,7 +92,7 @@ def is_closing_message(text):
         return any(re.match(pattern, text) for pattern in closing_patterns)
     return False
 
-# --- ตรวจ gibberish / typo ---
+# --- Check gibberish or typo ---
 def is_gibberish_or_typo(text):
     text = text.strip()
     if len(text) <= 2:
@@ -101,18 +102,19 @@ def is_gibberish_or_typo(text):
         return True
     return False
 
-# --- ตรวจภาษา ---
+# --- Detect language ---
 def detect_language(text):
     thai_chars = re.findall(r'[\u0E00-\u0E7F]', text)
     return "th" if len(thai_chars) / max(len(text), 1) > 0.3 else "en"
 
-# --- Session state ---
+# --- Initialize session state ---
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
 # --- UI ---
 st.title("💖 LockLearn Lifecoach")
 
+# Show previous chat history
 for entry in st.session_state.chat_history:
     with st.chat_message(entry["role"]):
         st.markdown(entry["content"])
