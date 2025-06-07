@@ -1,9 +1,10 @@
+streamlit
 torch
 sentence-transformers==2.2.2
 huggingface_hub==0.13.3
 chromadb==0.4.24
+numpy==1.23.5
 protobuf==3.20.3
 requests
-streamlit
 pysqlite3-binary==0.5.3.post1
 gdown>=4.7.1
