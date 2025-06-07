@@ -7,8 +7,7 @@ sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 import gdown
 import streamlit as st
-import chromadb
-from chromadb.config import Settings
+from chromadb import PersistentClient
 import requests
 import re
 from sentence_transformers import SentenceTransformer
@@ -25,16 +24,14 @@ if not os.path.exists(folder_path):
     gdown.download_folder(id=folder_id, quiet=False, use_cookies=False)
     st.success("✅ ดาวน์โหลดเรียบร้อยแล้ว!")
 
-# --- โหลด ChromaDB จากโฟลเดอร์ที่โหลดมา ---
-client = chromadb.Client(Settings(
-    chroma_db_impl="duckdb+parquet",
-    persist_directory=folder_path
-))
+# --- โหลด ChromaDB แบบ persistent client ---
+client = PersistentClient(path=folder_path)
 
 # --- เช็คว่ามี collection "recommendations" หรือยัง ---
 try:
     collection = client.get_collection(name="recommendations")
-except ValueError:
+except Exception:
+    # กรณีไม่เจอ collection ให้สร้างใหม่
     collection = client.create_collection(name="recommendations")
 
 # --- โหลด embedding model ---
