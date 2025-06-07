@@ -6,3 +6,4 @@ protobuf==3.20.3
 requests
 streamlit
 gdown>=4.7.1
+numpy<2.0.0,>=1.24.0
