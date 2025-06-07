@@ -2,8 +2,8 @@ import os
 import sys
 import re
 import shutil
-import gdown
 import zipfile
+import gdown
 import streamlit as st
 import requests
 
@@ -30,15 +30,14 @@ def clear_old_database(path):
 # --- ฟังก์ชันดาวน์โหลดและแตก zip ---
 def download_and_extract():
     st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำ (Vector DB) จาก Google Drive...")
-    gdrive_file_id = "13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca"  # เปลี่ยนตามไฟล์จริงของคุณ
+    gdrive_file_id = "13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca"  # แก้ไข ID ตามจริง
     gdown.download(id=gdrive_file_id, output=zip_file_path, quiet=False, use_cookies=False)
-
     with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
         zip_ref.extractall(folder_path)
     os.remove(zip_file_path)
     st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
 
-# --- ฟังก์ชันสร้างฐานข้อมูลใหม่ (empty) ---
+# --- ฟังก์ชันสร้างฐานข้อมูลใหม่ ---
 def create_empty_collection(client):
     try:
         collection = client.create_collection(name="recommendations")
@@ -54,7 +53,7 @@ embedding_model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2')
 # --- โหลด API Key จาก secrets.toml ---
 api_key = st.secrets["TOGETHER_API_KEY"]
 
-# --- ฟังก์ชันเรียก LLaMA 4 Scout ผ่าน Together AI ---
+# --- ฟังก์ชันเรียก LLaMA 4 Scout ---
 def query_llm_with_chat(prompt, api_key):
     url = "https://api.together.xyz/v1/chat/completions"
     headers = {
@@ -77,20 +76,17 @@ def query_llm_with_chat(prompt, api_key):
     except Exception as e:
         return f"❌ Request failed: {e}"
 
-# --- ฟังก์ชันดึงคำแนะนำจาก ChromaDB ---
+# --- ดึงคำแนะนำจาก ChromaDB ---
 def retrieve_recommendations(collection, question_embedding, top_k=10):
     try:
-        results = collection.query(
-            query_embeddings=[question_embedding],
-            n_results=top_k
-        )
+        results = collection.query(query_embeddings=[question_embedding], n_results=top_k)
         if results and results.get('documents'):
             return results['documents'][0]
     except Exception as e:
-        st.error(f"❌ เกิดข้อผิดพลาดในการดึงข้อมูลจากฐานข้อมูล: {e}")
+        st.error(f"❌ ดึงข้อมูลผิดพลาด: {e}")
     return []
 
-# --- ฟังก์ชันตรวจข้อความปิดท้าย ---
+# --- ตรวจข้อความปิดท้าย ---
 def is_closing_message(text):
     closing_patterns = [
         r"^ขอบคุณ.*", r"^ขอบใจ.*", r"^โอเค.*", r"^เข้าใจ.*", r"^ได้เลย.*", r"^รับทราบ.*",
@@ -103,7 +99,7 @@ def is_closing_message(text):
                 return True
     return False
 
-# --- ฟังก์ชันตรวจ gibberish หรือ typo ง่ายๆ ---
+# --- ตรวจ gibberish หรือ typo ---
 def is_gibberish_or_typo(text):
     text = text.strip()
     if len(text) <= 2:
@@ -113,34 +109,31 @@ def is_gibberish_or_typo(text):
         return True
     return False
 
-# --- ฟังก์ชันตรวจภาษาแบบง่าย ---
+# --- ตรวจภาษา ---
 def detect_language(text):
     thai_chars = re.findall(r'[\u0E00-\u0E7F]', text)
     return "th" if len(thai_chars) / max(len(text), 1) > 0.3 else "en"
 
-# --- Session state สำหรับเก็บประวัติแชท ---
+# --- Session state สำหรับแชท ---
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# --- เริ่มโหลดฐานข้อมูล ChromaDB แบบ persistent client ---
+# --- โหลดหรือสร้าง ChromaDB ---
 try:
     if not os.path.exists(folder_path):
-        # ถ้าไม่มีโฟลเดอร์ฐานข้อมูล ให้ดาวน์โหลดและแตกไฟล์ก่อน
         download_and_extract()
     client = PersistentClient(path=folder_path)
 except Exception as e:
-    st.error(f"❌ ไม่สามารถโหลด ChromaDB ได้: {e}")
-    # ลองลบฐานข้อมูลเก่าแล้วสร้างใหม่
+    st.error(f"❌ โหลด ChromaDB ไม่ได้: {e}")
     clear_old_database(folder_path)
-    st.info("ลองสร้างฐานข้อมูลใหม่จากศูนย์...")
+    st.info("กำลังสร้างฐานข้อมูลใหม่...")
     try:
         client = PersistentClient(path=folder_path)
         collection = create_empty_collection(client)
     except Exception as e2:
-        st.error(f"❌ สร้างฐานข้อมูลใหม่ก็ล้มเหลว: {e2}")
+        st.error(f"❌ สร้างใหม่ก็ล้มเหลว: {e2}")
         st.stop()
 else:
-    # โหลดหรือสร้าง collection ชื่อ "recommendations"
     try:
         collection = client.get_collection(name="recommendations")
     except Exception:
@@ -184,11 +177,7 @@ Step 1: Briefly analyze the user's feelings or situation based on the message ab
 Step 2: Using your analysis and the recommendations below, generate a supportive and practical response.
 
 Recommendations:
-"""
-            for rec in recommendations:
-                prompt += f"- {rec}\n"
-
-            prompt += f"""
+""" + "\n".join(f"- {rec}" for rec in recommendations) + f"""
 
 Please respond in {'Thai' if lang == 'th' else 'English'} with a {'polite and warm tone, ending sentences with "ค่ะ"' if lang == 'th' else 'kind and uplifting tone like a supportive female life coach'}.
 
