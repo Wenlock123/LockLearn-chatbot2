@@ -38,6 +38,29 @@ if not os.path.exists(folder_path):
     
     st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
 
+# --- ฟังก์ชันแสดงโครงสร้างโฟลเดอร์และไฟล์ ---
+def list_folder_files(folder_path):
+    """
+    แสดงโครงสร้างไฟล์และโฟลเดอร์ภายใน folder_path
+    """
+    file_list = []
+    for root, dirs, files in os.walk(folder_path):
+        level = root.replace(folder_path, '').count(os.sep)
+        indent = ' ' * 4 * level
+        file_list.append(f"{indent}{os.path.basename(root)}/")
+        subindent = ' ' * 4 * (level + 1)
+        for f in files:
+            file_list.append(f"{subindent}{f}")
+    return "\n".join(file_list)
+
+# --- แสดงโครงสร้างโฟลเดอร์เพื่อช่วยตรวจสอบ ---
+if os.path.exists(folder_path):
+    st.info(f"โฟลเดอร์ {folder_path} มีไฟล์ดังนี้:")
+    folder_structure = list_folder_files(folder_path)
+    st.text(folder_structure)
+else:
+    st.warning(f"ไม่พบโฟลเดอร์ {folder_path} กรุณารอให้ระบบดาวน์โหลดฐานข้อมูลก่อน")
+
 # --- ฟังก์ชันตรวจสอบ tenant ในฐานข้อมูล chroma.sqlite3 ---
 def get_existing_tenants(db_path):
     tenants = []
@@ -196,7 +219,7 @@ Recommendations:
 
             prompt += f"""
 
-Please respond in {'Thai' if lang == 'th' else 'English'} with a {'polite and warm tone, ending sentences with "ค่ะ"' if lang == 'th' else 'kind and uplifting tone like a supportive female life coach'}.
+Please respond in {'Thai' if lang == 'th' else 'English'} with a {'polite and warm tone, ending sentences with "ค่ะ"' if lang == 'th' else 'kind and uplifting tone like a supportive female life coach'}. 
 
 Your response should:
 - Reflect understanding of the user's feelings or situation.
