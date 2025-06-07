@@ -1,11 +1,8 @@
 streamlit
-torch==1.13.1
 sentence-transformers==2.2.2
 huggingface_hub==0.13.3
-chromadb>=0.3.21
-numpy==1.23.5
-protobuf>=3.20.1,<4.0.0
+chromadb==0.4.24
 requests
 pysqlite3-binary==0.5.3.post1
 gdown>=4.7.1
-pydantic>=1.10.7,<2.0.0
+pydantic==1.10.7
