@@ -18,48 +18,25 @@ from sentence_transformers import SentenceTransformer
 st.set_page_config(page_title="LockLearn Lifecoach", page_icon="💖", layout="centered")
 
 # --- กำหนด path สำหรับฐานข้อมูล ---
-folder_path = "./chromadb_database_v2"
+folder_path = "./chromadb_database_v2/chromadb_database_v2"  # แก้ไขตรงนี้ให้ชี้ไป path ที่ถูกต้องของฐานข้อมูล
 zip_file_path = "./chromadb_database_v2.zip"
 
 # --- ดาวน์โหลดไฟล์ zip vector database จาก Google Drive ถ้าไม่มีฐานข้อมูล ---
 if not os.path.exists(folder_path):
     st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำ (Vector DB) จาก Google Drive...")
-    
+
     # ลิงก์ Google Drive ของไฟล์ zip ที่ให้มา
     gdrive_file_id = "13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca"
     gdown.download(id=gdrive_file_id, output=zip_file_path, quiet=False, use_cookies=False)
-    
+
     # แตก zip ไฟล์
     with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
-        zip_ref.extractall(folder_path)
-    
+        zip_ref.extractall("./chromadb_database_v2")  # แตกไฟล์ในโฟลเดอร์แม่
+
     # ลบไฟล์ zip หลังแตกไฟล์แล้ว (ถ้าต้องการ)
     os.remove(zip_file_path)
-    
+
     st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
-
-# --- ฟังก์ชันแสดงโครงสร้างโฟลเดอร์และไฟล์ ---
-def list_folder_files(folder_path):
-    """
-    แสดงโครงสร้างไฟล์และโฟลเดอร์ภายใน folder_path
-    """
-    file_list = []
-    for root, dirs, files in os.walk(folder_path):
-        level = root.replace(folder_path, '').count(os.sep)
-        indent = ' ' * 4 * level
-        file_list.append(f"{indent}{os.path.basename(root)}/")
-        subindent = ' ' * 4 * (level + 1)
-        for f in files:
-            file_list.append(f"{subindent}{f}")
-    return "\n".join(file_list)
-
-# --- แสดงโครงสร้างโฟลเดอร์เพื่อช่วยตรวจสอบ ---
-if os.path.exists(folder_path):
-    st.info(f"โฟลเดอร์ {folder_path} มีไฟล์ดังนี้:")
-    folder_structure = list_folder_files(folder_path)
-    st.text(folder_structure)
-else:
-    st.warning(f"ไม่พบโฟลเดอร์ {folder_path} กรุณารอให้ระบบดาวน์โหลดฐานข้อมูลก่อน")
 
 # --- ฟังก์ชันตรวจสอบ tenant ในฐานข้อมูล chroma.sqlite3 ---
 def get_existing_tenants(db_path):
@@ -84,12 +61,20 @@ db_sqlite_path = os.path.join(folder_path, "chroma.sqlite3")
 tenants = get_existing_tenants(db_sqlite_path)
 st.write(f"พบ tenants ในฐานข้อมูล: {tenants}")
 
-# เลือก tenant ที่จะใช้
-tenant_to_use = "default_tenant" if "default_tenant" in tenants else (tenants[0] if tenants else None)
+# สร้าง tenant เองถ้าไม่มี tenant
+if not tenants:
+    st.warning("⚠️ ไม่พบ tenant ในฐานข้อมูล จะสร้าง tenant ใหม่ชื่อ 'default_tenant' ให้แทน")
+    # สร้าง PersistentClient ชั่วคราว (ไม่ระบุ tenant)
+    try:
+        client_tmp = PersistentClient(path=folder_path)
+        client_tmp.create_tenant("default_tenant")
+        tenants = ["default_tenant"]
+        client_tmp.close()
+    except Exception as e:
+        st.error(f"❌ สร้าง tenant ไม่สำเร็จ: {e}")
+        st.stop()
 
-if tenant_to_use is None:
-    st.error("❌ ไม่พบ tenant ในฐานข้อมูล กรุณาใช้ฐานข้อมูลที่ถูกต้องหรือสร้างฐานข้อมูลใหม่")
-    st.stop()
+tenant_to_use = "default_tenant" if "default_tenant" in tenants else tenants[0]
 
 try:
     client = PersistentClient(path=folder_path, tenant_id=tenant_to_use)
@@ -219,7 +204,7 @@ Recommendations:
 
             prompt += f"""
 
-Please respond in {'Thai' if lang == 'th' else 'English'} with a {'polite and warm tone, ending sentences with "ค่ะ"' if lang == 'th' else 'kind and uplifting tone like a supportive female life coach'}. 
+Please respond in {'Thai' if lang == 'th' else 'English'} with a {'polite and warm tone, ending sentences with "ค่ะ"' if lang == 'th' else 'kind and uplifting tone like a supportive female life coach'}.
 
 Your response should:
 - Reflect understanding of the user's feelings or situation.
