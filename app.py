@@ -1,58 +1,62 @@
-# --- sqlite3 patch สำหรับ Streamlit Cloud ---
-__import__('pysqlite3')
-import sys
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-
-# --- Imports ---
 import os
+import sys
 import re
-import shutil
-import zipfile
 import gdown
+import zipfile
 import streamlit as st
 import requests
-import chromadb
+
+# --- Patch sqlite3 สำหรับ Streamlit Cloud ---
+__import__('pysqlite3')
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+
+from chromadb import PersistentClient
 from sentence_transformers import SentenceTransformer
 
 # --- ตั้งค่าหน้า Streamlit ---
 st.set_page_config(page_title="LockLearn Lifecoach", page_icon="💖", layout="centered")
-st.title("💖 LockLearn Lifecoach")
 
-# --- ชื่อไฟล์และโฟลเดอร์ของฐานข้อมูล ---
+# --- กำหนด path สำหรับฐานข้อมูล ---
+folder_path = "./chromadb_database_v2"
 zip_file_path = "./chromadb_database_v2.zip"
-unpacked_folder_name = "chromadb_database_v2"
 
-# --- ลบโฟลเดอร์เก่า (หากมี) เพื่อหลีกเลี่ยง schema conflict ---
-if os.path.exists(unpacked_folder_name):
-    shutil.rmtree(unpacked_folder_name)
+# --- ดาวน์โหลดไฟล์ zip vector database จาก Google Drive ถ้าไม่มีฐานข้อมูล ---
+if not os.path.exists(folder_path):
+    st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำ (Vector DB) จาก Google Drive...")
+    
+    # ลิงก์ Google Drive ของไฟล์ zip ที่ให้มา
+    gdrive_file_id = "13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca"
+    gdown.download(id=gdrive_file_id, output=zip_file_path, quiet=False, use_cookies=False)
+    
+    # แตก zip ไฟล์
+    with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+        zip_ref.extractall(folder_path)
+    
+    # ลบไฟล์ zip หลังแตกไฟล์แล้ว (ถ้าต้องการ)
+    os.remove(zip_file_path)
+    
+    st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
 
-# --- ดาวน์โหลด ZIP จาก Google Drive ---
-st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำจาก Google Drive...")
-gdown.download(id="13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca", output=zip_file_path, quiet=False)
-
-# --- แตกไฟล์ ZIP ---
-with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
-    zip_ref.extractall(".")
-
-# --- ลบไฟล์ ZIP ---
-os.remove(zip_file_path)
-st.success("✅ ดาวน์โหลดและแตกไฟล์เรียบร้อยแล้ว!")
-
-# --- โหลด ChromaDB ---
+# --- โหลด ChromaDB แบบ persistent client ---
 try:
-    client = chromadb.PersistentClient(path=unpacked_folder_name)
-    collection = client.get_collection(name="recommendations")
+    client = PersistentClient(path=folder_path)
 except Exception as e:
     st.error(f"❌ ไม่สามารถโหลด ChromaDB ได้: {e}")
     st.stop()
 
+# --- เช็คว่ามี collection "recommendations" หรือยัง ---
+try:
+    collection = client.get_collection(name="recommendations")
+except Exception:
+    collection = client.create_collection(name="recommendations")
+
 # --- โหลด embedding model ---
 embedding_model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2')
 
-# --- โหลด API Key ---
+# --- โหลด API Key จาก secrets.toml ---
 api_key = st.secrets["TOGETHER_API_KEY"]
 
-# --- ฟังก์ชันเรียก LLM ผ่าน Together API ---
+# --- ฟังก์ชันเรียก LLaMA 4 Scout ผ่าน Together AI ---
 def query_llm_with_chat(prompt, api_key):
     url = "https://api.together.xyz/v1/chat/completions"
     headers = {
@@ -64,7 +68,7 @@ def query_llm_with_chat(prompt, api_key):
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.7,
         "top_p": 0.9,
-        "max_tokens": 512
+        "max_tokens": 512,
     }
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=15)
@@ -75,7 +79,7 @@ def query_llm_with_chat(prompt, api_key):
     except Exception as e:
         return f"❌ Request failed: {e}"
 
-# --- ดึงคำแนะนำ ---
+# --- ฟังก์ชันดึงคำแนะนำจาก ChromaDB ---
 def retrieve_recommendations(question_embedding, top_k=10):
     results = collection.query(
         query_embeddings=[question_embedding],
@@ -85,7 +89,20 @@ def retrieve_recommendations(question_embedding, top_k=10):
         return results['documents'][0]
     return []
 
-# --- ตรวจข้อความมั่วหรือพิมพ์ผิด ---
+# --- ฟังก์ชันตรวจข้อความปิดท้าย ---
+def is_closing_message(text):
+    closing_patterns = [
+        r"^ขอบคุณ.*", r"^ขอบใจ.*", r"^โอเค.*", r"^เข้าใจ.*", r"^ได้เลย.*", r"^รับทราบ.*",
+        r"^thank(s| you).*", r"^ok.*", r"^got it.*", r"^noted.*", r"^understood.*"
+    ]
+    text = text.strip().lower()
+    if len(text.split()) <= 5:
+        for pattern in closing_patterns:
+            if re.match(pattern, text):
+                return True
+    return False
+
+# --- ฟังก์ชันตรวจ gibberish หรือ typo ง่ายๆ ---
 def is_gibberish_or_typo(text):
     text = text.strip()
     if len(text) <= 2:
@@ -95,35 +112,23 @@ def is_gibberish_or_typo(text):
         return True
     return False
 
-# --- ตรวจว่าข้อความเป็นการปิดบทสนทนาไหม ---
-def is_closing_message(text):
-    closing_patterns = [
-        r"^ขอบคุณ.*", r"^ขอบใจ.*", r"^โอเค.*", r"^เข้าใจ.*", r"^ได้เลย.*", r"^รับทราบ.*",
-        r"^thank(s| you).*"," r"^ok.*", r"^got it.*", r"^noted.*", r"^understood.*"
-    ]
-    text = text.strip().lower()
-    if len(text.split()) <= 5:
-        for pattern in closing_patterns:
-            if re.match(pattern, text):
-                return True
-    return False
-
-# --- ตรวจจับภาษา ---
+# --- ฟังก์ชันตรวจภาษาแบบง่าย ---
 def detect_language(text):
     thai_chars = re.findall(r'[\u0E00-\u0E7F]', text)
     return "th" if len(thai_chars) / max(len(text), 1) > 0.3 else "en"
 
-# --- สร้าง session state สำหรับเก็บประวัติแชท ---
+# --- Session state สำหรับเก็บประวัติแชท ---
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# --- แสดงประวัติแชท ---
+# --- UI ---
+st.title("💖 LockLearn Lifecoach")
+
 for entry in st.session_state.chat_history:
     with st.chat_message(entry["role"]):
         st.markdown(entry["content"])
 
-# --- ช่องพิมพ์ข้อความ ---
-user_input = st.chat_input("How can I support you today? Feel free to ask me anything")
+user_input = st.chat_input("How can I support you today?")
 
 if user_input:
     st.session_state.chat_history.append({"role": "user", "content": user_input})
@@ -148,7 +153,7 @@ if user_input:
             recommendations = retrieve_recommendations(question_embedding, top_k=10)
 
             prompt = f"""
-User message: \"{user_input}\"
+User message: "{user_input}"
 
 Step 1: Briefly analyze the user's feelings or situation based on the message above.
 Step 2: Using your analysis and the recommendations below, generate a supportive and practical response.
@@ -160,7 +165,7 @@ Recommendations:
 
             prompt += f"""
 
-Please respond in {'Thai' if lang == 'th' else 'English'} with a {'polite and warm tone, ending sentences with \"ค่ะ\"' if lang == 'th' else 'kind and uplifting tone like a supportive female life coach'}.
+Please respond in {'Thai' if lang == 'th' else 'English'} with a {'polite and warm tone, ending sentences with "ค่ะ"' if lang == 'th' else 'kind and uplifting tone like a supportive female life coach'}.
 
 Your response should:
 - Reflect understanding of the user's feelings or situation.
