@@ -40,9 +40,16 @@ os.remove(zip_file_path)
 
 st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
 
+# --- เนื่องจากโฟลเดอร์ฐานข้อมูลใน zip อยู่ใน chromadb_database_v2/chromadb_database_v2 ---
+nested_folder_path = os.path.join(folder_path, "chromadb_database_v2")
+
+if not os.path.exists(nested_folder_path):
+    st.error(f"❌ ไม่พบโฟลเดอร์ {nested_folder_path} หลังแตกไฟล์ zip")
+    st.stop()
+
 # --- โหลด ChromaDB แบบ persistent client ---
 try:
-    client = PersistentClient(path=folder_path)
+    client = PersistentClient(path=nested_folder_path)
 except Exception as e:
     st.error(f"❌ ไม่สามารถโหลด ChromaDB ได้: {e}")
     st.stop()
