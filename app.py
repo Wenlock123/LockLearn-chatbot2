@@ -1,28 +1,28 @@
-# --- Imports ---
-import os
-import sys
-import re
-import shutil
-import gdown
-import zipfile
-import streamlit as st
-import requests
-
-# --- Patch sqlite3 สำหรับ Streamlit Cloud ---
+# --- sqlite3 patch สำหรับ Streamlit Cloud ---
 __import__('pysqlite3')
+import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
-from chromadb import PersistentClient
+# --- Imports ---
+import os
+import re
+import shutil
+import zipfile
+import gdown
+import streamlit as st
+import requests
+import chromadb
 from sentence_transformers import SentenceTransformer
 
 # --- ตั้งค่าหน้า Streamlit ---
 st.set_page_config(page_title="LockLearn Lifecoach", page_icon="💖", layout="centered")
+st.title("💖 LockLearn Lifecoach")
 
-# --- กำหนดชื่อไฟล์และโฟลเดอร์ ---
+# --- ชื่อไฟล์และโฟลเดอร์ของฐานข้อมูล ---
 zip_file_path = "./chromadb_database_v2.zip"
 unpacked_folder_name = "chromadb_database_v2"
 
-# --- ลบโฟลเดอร์เดิม (ถ้ามี) เพื่อป้องกัน schema ไม่ตรงกัน ---
+# --- ลบโฟลเดอร์เก่า (หากมี) เพื่อหลีกเลี่ยง schema conflict ---
 if os.path.exists(unpacked_folder_name):
     shutil.rmtree(unpacked_folder_name)
 
@@ -38,9 +38,9 @@ with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
 os.remove(zip_file_path)
 st.success("✅ ดาวน์โหลดและแตกไฟล์เรียบร้อยแล้ว!")
 
-# --- โหลด ChromaDB ด้วย PersistentClient เวอร์ชันเก่า ---
+# --- โหลด ChromaDB ---
 try:
-    client = PersistentClient(path=unpacked_folder_name)
+    client = chromadb.PersistentClient(path=unpacked_folder_name)
     collection = client.get_collection(name="recommendations")
 except Exception as e:
     st.error(f"❌ ไม่สามารถโหลด ChromaDB ได้: {e}")
@@ -49,10 +49,10 @@ except Exception as e:
 # --- โหลด embedding model ---
 embedding_model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2')
 
-# --- โหลด API key ---
+# --- โหลด API Key ---
 api_key = st.secrets["TOGETHER_API_KEY"]
 
-# --- ฟังก์ชันเรียก LLaMA 4 Scout ---
+# --- ฟังก์ชันเรียก LLM ผ่าน Together API ---
 def query_llm_with_chat(prompt, api_key):
     url = "https://api.together.xyz/v1/chat/completions"
     headers = {
@@ -64,7 +64,7 @@ def query_llm_with_chat(prompt, api_key):
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.7,
         "top_p": 0.9,
-        "max_tokens": 512,
+        "max_tokens": 512
     }
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=15)
@@ -75,26 +75,17 @@ def query_llm_with_chat(prompt, api_key):
     except Exception as e:
         return f"❌ Request failed: {e}"
 
-# --- ฟังก์ชันดึงคำแนะนำ ---
+# --- ดึงคำแนะนำ ---
 def retrieve_recommendations(question_embedding, top_k=10):
-    results = collection.query(query_embeddings=[question_embedding], n_results=top_k)
+    results = collection.query(
+        query_embeddings=[question_embedding],
+        n_results=top_k
+    )
     if results and results.get('documents'):
         return results['documents'][0]
-    else:
-        return []
+    return []
 
-# --- ตรวจข้อความปิดท้าย ---
-def is_closing_message(text):
-    closing_patterns = [
-        r"^ขอบคุณ.*", r"^ขอบใจ.*", r"^โอเค.*", r"^เข้าใจ.*", r"^ได้เลย.*", r"^รับทราบ.*",
-        r"^thank(s| you).*", r"^ok.*", r"^got it.*", r"^noted.*", r"^understood.*"
-    ]
-    text = text.strip().lower()
-    if len(text.split()) <= 5:
-        return any(re.match(pattern, text) for pattern in closing_patterns)
-    return False
-
-# --- ตรวจ gibberish / typo ---
+# --- ตรวจข้อความมั่วหรือพิมพ์ผิด ---
 def is_gibberish_or_typo(text):
     text = text.strip()
     if len(text) <= 2:
@@ -104,23 +95,35 @@ def is_gibberish_or_typo(text):
         return True
     return False
 
-# --- ตรวจภาษา ---
+# --- ตรวจว่าข้อความเป็นการปิดบทสนทนาไหม ---
+def is_closing_message(text):
+    closing_patterns = [
+        r"^ขอบคุณ.*", r"^ขอบใจ.*", r"^โอเค.*", r"^เข้าใจ.*", r"^ได้เลย.*", r"^รับทราบ.*",
+        r"^thank(s| you).*", r"^ok.*", r"^got it.*", r"^noted.*", r"^understood.*"
+    ]
+    text = text.strip().lower()
+    if len(text.split()) <= 5:
+        for pattern in closing_patterns:
+            if re.match(pattern, text):
+                return True
+    return False
+
+# --- ตรวจจับภาษา ---
 def detect_language(text):
     thai_chars = re.findall(r'[\u0E00-\u0E7F]', text)
     return "th" if len(thai_chars) / max(len(text), 1) > 0.3 else "en"
 
-# --- Session state ---
+# --- สร้าง session state สำหรับเก็บประวัติแชท ---
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# --- UI ---
-st.title("💖 LockLearn Lifecoach")
-
+# --- แสดงประวัติแชท ---
 for entry in st.session_state.chat_history:
     with st.chat_message(entry["role"]):
         st.markdown(entry["content"])
 
-user_input = st.chat_input("How can I support you today?")
+# --- ช่องพิมพ์ข้อความ ---
+user_input = st.chat_input("How can I support you today? Feel free to ask me anything")
 
 if user_input:
     st.session_state.chat_history.append({"role": "user", "content": user_input})
