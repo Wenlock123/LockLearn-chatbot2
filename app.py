@@ -17,32 +17,32 @@ from sentence_transformers import SentenceTransformer
 # --- ตั้งค่าหน้า Streamlit ---
 st.set_page_config(page_title="LockLearn Lifecoach", page_icon="💖", layout="centered")
 
-# --- กำหนด path สำหรับฐานข้อมูล ---
-folder_path = "./chromadb_database_v2"
+# --- กำหนดชื่อไฟล์และโฟลเดอร์ ---
 zip_file_path = "./chromadb_database_v2.zip"
+unpacked_folder_name = "chromadb_database_v2"
 
-# --- ลบฐานข้อมูลเก่า (ถ้ามี) เพื่อป้องกัน schema ไม่ตรงกัน ---
-if os.path.exists(folder_path):
-    shutil.rmtree(folder_path)
+# --- ลบโฟลเดอร์เดิม (ถ้ามี) เพื่อป้องกัน schema ไม่ตรงกัน ---
+if os.path.exists(unpacked_folder_name):
+    shutil.rmtree(unpacked_folder_name)
 
-# --- ดาวน์โหลดไฟล์ zip vector database จาก Google Drive ---
+# --- ดาวน์โหลดไฟล์ ZIP จาก Google Drive ---
 st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำ (Vector DB) จาก Google Drive...")
 
 gdrive_file_id = "13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca"
 gdown.download(id=gdrive_file_id, output=zip_file_path, quiet=False, use_cookies=False)
 
-# แตก zip ไฟล์
+# --- แตกไฟล์ ZIP ไปยังโฟลเดอร์ปัจจุบัน ---
 with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
-    zip_ref.extractall(folder_path)
+    zip_ref.extractall(".")
 
-# ลบไฟล์ zip หลังแตกไฟล์แล้ว
+# --- ลบไฟล์ ZIP หลังแตกไฟล์แล้ว ---
 os.remove(zip_file_path)
 
 st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
 
 # --- โหลด ChromaDB แบบ persistent client ---
 try:
-    client = PersistentClient(path=folder_path)
+    client = PersistentClient(path=unpacked_folder_name)
 except Exception as e:
     st.error(f"❌ ไม่สามารถโหลด ChromaDB ได้: {e}")
     st.stop()
