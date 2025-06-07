@@ -1,15 +1,15 @@
 import os
+import sys
+import re
+import gdown
+import streamlit as st
+import requests
 
 # --- Patch sqlite3 สำหรับ Streamlit Cloud ---
 __import__('pysqlite3')
-import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
-import gdown
-import streamlit as st
 from chromadb import PersistentClient
-import requests
-import re
 from sentence_transformers import SentenceTransformer
 
 # --- ตั้งค่าหน้า Streamlit ---
@@ -21,17 +21,22 @@ folder_path = "./chromadb_database_v2"
 
 if not os.path.exists(folder_path):
     st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำจาก Google Drive...")
+    # gdown.download_folder จะดาวน์โหลดทั้ง folder จาก Google Drive (ต้องเป็นโฟลเดอร์แชร์สาธารณะ)
     gdown.download_folder(id=folder_id, quiet=False, use_cookies=False)
     st.success("✅ ดาวน์โหลดเรียบร้อยแล้ว!")
 
 # --- โหลด ChromaDB แบบ persistent client ---
-client = PersistentClient(path=folder_path)
+try:
+    client = PersistentClient(path=folder_path)
+except Exception as e:
+    st.error(f"❌ ไม่สามารถโหลด ChromaDB ได้: {e}")
+    st.stop()
 
 # --- เช็คว่ามี collection "recommendations" หรือยัง ---
 try:
     collection = client.get_collection(name="recommendations")
 except Exception:
-    # กรณีไม่เจอ collection ให้สร้างใหม่
+    # ถ้าไม่มี ให้สร้างใหม่
     collection = client.create_collection(name="recommendations")
 
 # --- โหลด embedding model ---
@@ -52,7 +57,7 @@ def query_llm_with_chat(prompt, api_key):
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.7,
         "top_p": 0.9,
-        "max_tokens": 512
+        "max_tokens": 512,
     }
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=15)
@@ -73,7 +78,7 @@ def retrieve_recommendations(question_embedding, top_k=10):
         return results['documents'][0]
     return []
 
-# --- ฟังก์ชันตรวจข้อความ ---
+# --- ฟังก์ชันตรวจข้อความปิดท้าย ---
 def is_closing_message(text):
     closing_patterns = [
         r"^ขอบคุณ.*", r"^ขอบใจ.*", r"^โอเค.*", r"^เข้าใจ.*", r"^ได้เลย.*", r"^รับทราบ.*",
@@ -86,6 +91,7 @@ def is_closing_message(text):
                 return True
     return False
 
+# --- ฟังก์ชันตรวจ gibberish หรือ typo ง่ายๆ ---
 def is_gibberish_or_typo(text):
     text = text.strip()
     if len(text) <= 2:
@@ -95,15 +101,16 @@ def is_gibberish_or_typo(text):
         return True
     return False
 
+# --- ฟังก์ชันตรวจภาษาแบบง่าย ---
 def detect_language(text):
     thai_chars = re.findall(r'[\u0E00-\u0E7F]', text)
     return "th" if len(thai_chars) / max(len(text), 1) > 0.3 else "en"
 
-# --- Session state สำหรับแชท ---
+# --- Session state สำหรับเก็บประวัติแชท ---
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# --- ส่วนแสดงประวัติและกล่องแชท ---
+# --- UI ---
 st.title("💖 LockLearn Lifecoach")
 
 for entry in st.session_state.chat_history:
