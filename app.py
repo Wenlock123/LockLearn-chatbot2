@@ -21,44 +21,32 @@ st.set_page_config(page_title="LockLearn Lifecoach", page_icon="💖", layout="c
 folder_path = "./chromadb_database_v2"
 zip_file_path = "./chromadb_database_v2.zip"
 
-# --- ลบฐานข้อมูลเก่า (ถ้ามี) เพื่อป้องกัน schema ไม่ตรงกัน ---
-if os.path.exists(folder_path):
-    shutil.rmtree(folder_path)
+# --- ฟังก์ชันลบฐานข้อมูลเก่า ---
+def clear_old_database(path):
+    if os.path.exists(path):
+        shutil.rmtree(path)
+        st.warning("🗑️ ลบฐานข้อมูลเก่าเรียบร้อยแล้ว")
 
-# --- ดาวน์โหลดไฟล์ zip vector database จาก Google Drive ---
-st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำ (Vector DB) จาก Google Drive...")
+# --- ฟังก์ชันดาวน์โหลดและแตก zip ---
+def download_and_extract():
+    st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำ (Vector DB) จาก Google Drive...")
+    gdrive_file_id = "13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca"  # เปลี่ยนตามไฟล์จริงของคุณ
+    gdown.download(id=gdrive_file_id, output=zip_file_path, quiet=False, use_cookies=False)
 
-gdrive_file_id = "13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca"
-gdown.download(id=gdrive_file_id, output=zip_file_path, quiet=False, use_cookies=False)
+    with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+        zip_ref.extractall(folder_path)
+    os.remove(zip_file_path)
+    st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
 
-# แตก zip ไฟล์
-with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
-    zip_ref.extractall(folder_path)
-
-# ลบไฟล์ zip หลังแตกไฟล์แล้ว
-os.remove(zip_file_path)
-
-st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
-
-# --- เนื่องจากโฟลเดอร์ฐานข้อมูลใน zip อยู่ใน chromadb_database_v2/chromadb_database_v2 ---
-nested_folder_path = os.path.join(folder_path, "chromadb_database_v2")
-
-if not os.path.exists(nested_folder_path):
-    st.error(f"❌ ไม่พบโฟลเดอร์ {nested_folder_path} หลังแตกไฟล์ zip")
-    st.stop()
-
-# --- โหลด ChromaDB แบบ persistent client ---
-try:
-    client = PersistentClient(path=nested_folder_path)
-except Exception as e:
-    st.error(f"❌ ไม่สามารถโหลด ChromaDB ได้: {e}")
-    st.stop()
-
-# --- เช็คว่ามี collection "recommendations" หรือยัง ---
-try:
-    collection = client.get_collection(name="recommendations")
-except Exception:
-    collection = client.create_collection(name="recommendations")
+# --- ฟังก์ชันสร้างฐานข้อมูลใหม่ (empty) ---
+def create_empty_collection(client):
+    try:
+        collection = client.create_collection(name="recommendations")
+        st.info("🆕 สร้างฐานข้อมูลใหม่เรียบร้อยแล้ว")
+        return collection
+    except Exception as e:
+        st.error(f"❌ สร้าง collection ไม่ได้: {e}")
+        st.stop()
 
 # --- โหลด embedding model ---
 embedding_model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2')
@@ -90,13 +78,16 @@ def query_llm_with_chat(prompt, api_key):
         return f"❌ Request failed: {e}"
 
 # --- ฟังก์ชันดึงคำแนะนำจาก ChromaDB ---
-def retrieve_recommendations(question_embedding, top_k=10):
-    results = collection.query(
-        query_embeddings=[question_embedding],
-        n_results=top_k
-    )
-    if results and results.get('documents'):
-        return results['documents'][0]
+def retrieve_recommendations(collection, question_embedding, top_k=10):
+    try:
+        results = collection.query(
+            query_embeddings=[question_embedding],
+            n_results=top_k
+        )
+        if results and results.get('documents'):
+            return results['documents'][0]
+    except Exception as e:
+        st.error(f"❌ เกิดข้อผิดพลาดในการดึงข้อมูลจากฐานข้อมูล: {e}")
     return []
 
 # --- ฟังก์ชันตรวจข้อความปิดท้าย ---
@@ -131,6 +122,30 @@ def detect_language(text):
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
+# --- เริ่มโหลดฐานข้อมูล ChromaDB แบบ persistent client ---
+try:
+    if not os.path.exists(folder_path):
+        # ถ้าไม่มีโฟลเดอร์ฐานข้อมูล ให้ดาวน์โหลดและแตกไฟล์ก่อน
+        download_and_extract()
+    client = PersistentClient(path=folder_path)
+except Exception as e:
+    st.error(f"❌ ไม่สามารถโหลด ChromaDB ได้: {e}")
+    # ลองลบฐานข้อมูลเก่าแล้วสร้างใหม่
+    clear_old_database(folder_path)
+    st.info("ลองสร้างฐานข้อมูลใหม่จากศูนย์...")
+    try:
+        client = PersistentClient(path=folder_path)
+        collection = create_empty_collection(client)
+    except Exception as e2:
+        st.error(f"❌ สร้างฐานข้อมูลใหม่ก็ล้มเหลว: {e2}")
+        st.stop()
+else:
+    # โหลดหรือสร้าง collection ชื่อ "recommendations"
+    try:
+        collection = client.get_collection(name="recommendations")
+    except Exception:
+        collection = create_empty_collection(client)
+
 # --- UI ---
 st.title("💖 LockLearn Lifecoach")
 
@@ -160,7 +175,7 @@ if user_input:
     else:
         with st.spinner("Thinking..."):
             question_embedding = embedding_model.encode(user_input).tolist()
-            recommendations = retrieve_recommendations(question_embedding, top_k=10)
+            recommendations = retrieve_recommendations(collection, question_embedding, top_k=10)
 
             prompt = f"""
 User message: "{user_input}"
