@@ -1,10 +1,10 @@
-streamlit                      # Web UI framework
-torch==1.13.1                  # PyTorch for model compatibility
-sentence-transformers==2.2.2   # Embedding model interface
-huggingface_hub==0.13.3        # For Hugging Face model access
-chromadb==0.4.24               # Vector DB backend
-numpy==1.23.5                  # Numerical computations
-protobuf==3.20.3               # Compatibility with older protobuf models
-requests                       # API calling (e.g., Together API)
-pysqlite3-binary==0.5.3.post1  # SQLite fix for Streamlit Cloud
-gdown>=4.7.1                   # Google Drive download helper
+streamlit                     
+torch==1.13.1                  
+sentence-transformers==2.2.2   
+huggingface_hub==0.13.3        
+chromadb             
+numpy==1.23.5                 
+protobuf==3.20.3              
+requests                       
+pysqlite3-binary==0.5.3.post1  
+gdown>=4.7.1                
