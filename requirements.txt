@@ -2,10 +2,10 @@ streamlit
 torch==1.13.1
 sentence-transformers==2.2.2
 huggingface_hub==0.13.3
-chromadb==0.3.21
+chromadb==0.4.13  # ✅ ใช้เวอร์ชันที่รองรับ Client + Settings
 numpy==1.23.5
 protobuf==3.20.3
 requests
 pysqlite3-binary==0.5.3.post1
 gdown>=4.7.1
-pydantic==1.10.13  # ✅ เพิ่มบรรทัดนี้เพื่อแก้ปัญหา
+pydantic==1.10.13  # ✅ ป้องกันปัญหา chromadb กับ pydantic v2+
