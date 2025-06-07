@@ -2,6 +2,7 @@ import os
 import sys
 import re
 import gdown
+import zipfile
 import streamlit as st
 import requests
 
@@ -15,15 +16,26 @@ from sentence_transformers import SentenceTransformer
 # --- ตั้งค่าหน้า Streamlit ---
 st.set_page_config(page_title="LockLearn Lifecoach", page_icon="💖", layout="centered")
 
-# --- ดาวน์โหลด vector DB จาก Google Drive ถ้ายังไม่มี ---
-folder_id = "1-0htAA3XGLOb5qyi8e8Xoi_T8_D2sLDc"
+# --- กำหนด path สำหรับฐานข้อมูล ---
 folder_path = "./chromadb_database_v2"
+zip_file_path = "./chromadb_database_v2.zip"
 
+# --- ดาวน์โหลดไฟล์ zip vector database จาก Google Drive ถ้าไม่มีฐานข้อมูล ---
 if not os.path.exists(folder_path):
-    st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำจาก Google Drive...")
-    # เพิ่ม output=folder_path เพื่อดาวน์โหลดลงโฟลเดอร์ที่กำหนด
-    gdown.download_folder(id=folder_id, output=folder_path, quiet=False, use_cookies=False)
-    st.success("✅ ดาวน์โหลดเรียบร้อยแล้ว!")
+    st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำ (Vector DB) จาก Google Drive...")
+    
+    # ลิงก์ Google Drive ของไฟล์ zip ที่ให้มา
+    gdrive_file_id = "13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca"
+    gdown.download(id=gdrive_file_id, output=zip_file_path, quiet=False, use_cookies=False)
+    
+    # แตก zip ไฟล์
+    with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+        zip_ref.extractall(folder_path)
+    
+    # ลบไฟล์ zip หลังแตกไฟล์แล้ว (ถ้าต้องการ)
+    os.remove(zip_file_path)
+    
+    st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
 
 # --- โหลด ChromaDB แบบ persistent client ---
 try:
@@ -69,20 +81,13 @@ def query_llm_with_chat(prompt, api_key):
 
 # --- ฟังก์ชันดึงคำแนะนำจาก ChromaDB ---
 def retrieve_recommendations(question_embedding, top_k=10):
-    try:
-        results = collection.query(
-            query_embeddings=[question_embedding],
-            n_results=top_k
-        )
-        # ตรวจสอบว่ามีเอกสารและข้อมูลคำแนะนำหรือไม่
-        if results and 'documents' in results and len(results['documents']) > 0:
-            # results['documents'][0] เป็น list ของคำแนะนำ
-            return results['documents'][0]
-        else:
-            return []
-    except Exception as e:
-        st.error(f"❌ Error retrieving recommendations: {e}")
-        return []
+    results = collection.query(
+        query_embeddings=[question_embedding],
+        n_results=top_k
+    )
+    if results and results.get('documents'):
+        return results['documents'][0]
+    return []
 
 # --- ฟังก์ชันตรวจข้อความปิดท้าย ---
 def is_closing_message(text):
@@ -119,7 +124,6 @@ if "chat_history" not in st.session_state:
 # --- UI ---
 st.title("💖 LockLearn Lifecoach")
 
-# แสดงประวัติแชทเก่า
 for entry in st.session_state.chat_history:
     with st.chat_message(entry["role"]):
         st.markdown(entry["content"])
@@ -148,13 +152,7 @@ if user_input:
             question_embedding = embedding_model.encode(user_input).tolist()
             recommendations = retrieve_recommendations(question_embedding, top_k=10)
 
-            if not recommendations:
-                reply = {
-                    "th": "ขอโทษครับ ผมยังไม่มีคำแนะนำที่เกี่ยวข้องกับข้อความของคุณ ลองถามใหม่อีกครั้งนะครับ",
-                    "en": "Sorry, I don't have relevant recommendations for your input yet. Please try again."
-                }[lang]
-            else:
-                prompt = f"""
+            prompt = f"""
 User message: "{user_input}"
 
 Step 1: Briefly analyze the user's feelings or situation based on the message above.
@@ -162,10 +160,10 @@ Step 2: Using your analysis and the recommendations below, generate a supportive
 
 Recommendations:
 """
-                for rec in recommendations:
-                    prompt += f"- {rec}\n"
+            for rec in recommendations:
+                prompt += f"- {rec}\n"
 
-                prompt += f"""
+            prompt += f"""
 
 Please respond in {'Thai' if lang == 'th' else 'English'} with a {'polite and warm tone, ending sentences with "ค่ะ"' if lang == 'th' else 'kind and uplifting tone like a supportive female life coach'}.
 
@@ -176,7 +174,7 @@ Your response should:
 - Be concise (1–2 sentences) and encouraging.
 """
 
-                reply = query_llm_with_chat(prompt, api_key)
+            reply = query_llm_with_chat(prompt, api_key)
 
     st.session_state.chat_history.append({"role": "assistant", "content": reply})
     with st.chat_message("assistant", avatar="🧘‍♀️"):
