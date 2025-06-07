@@ -30,7 +30,8 @@ client = chromadb.Client()
 # --- เช็คว่ามี collection "recommendations" หรือยัง ---
 try:
     collection = client.get_collection(name="recommendations")
-except chromadb.errors.NotFoundError:
+except Exception as e:
+    # กรณีไม่เจอ collection ให้สร้างใหม่
     collection = client.create_collection(name="recommendations")
 
 # --- โหลด embedding model ---
