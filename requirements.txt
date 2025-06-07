@@ -7,4 +7,3 @@ requests
 streamlit
 pysqlite3-binary==0.5.3.post1
 gdown>=4.7.1
-numpy==1.23.5
