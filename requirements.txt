@@ -1,5 +1,5 @@
 streamlit
-torch
+torch==1.13.1
 sentence-transformers==2.2.2
 huggingface_hub==0.13.3
 chromadb==0.4.24
