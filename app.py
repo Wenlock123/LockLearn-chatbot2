@@ -5,6 +5,7 @@ import gdown
 import zipfile
 import streamlit as st
 import requests
+import shutil  # ใช้ลบโฟลเดอร์ฐานข้อมูลเก่า
 
 # --- Patch sqlite3 สำหรับ Streamlit Cloud ---
 __import__('pysqlite3')
@@ -20,22 +21,29 @@ st.set_page_config(page_title="LockLearn Lifecoach", page_icon="💖", layout="c
 folder_path = "./chromadb_database_v2"
 zip_file_path = "./chromadb_database_v2.zip"
 
-# --- ดาวน์โหลดไฟล์ zip vector database จาก Google Drive ถ้าไม่มีฐานข้อมูล ---
-if not os.path.exists(folder_path):
-    st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำ (Vector DB) จาก Google Drive...")
-    
-    # ลิงก์ Google Drive ของไฟล์ zip ที่ให้มา
-    gdrive_file_id = "13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca"
-    gdown.download(id=gdrive_file_id, output=zip_file_path, quiet=False, use_cookies=False)
-    
-    # แตก zip ไฟล์
-    with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
-        zip_ref.extractall(folder_path)
-    
-    # ลบไฟล์ zip หลังแตกไฟล์แล้ว (ถ้าต้องการ)
-    os.remove(zip_file_path)
-    
-    st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
+# --- ลบฐานข้อมูลเก่า (ถ้ามี) เพื่อป้องกัน schema mismatch ---
+if os.path.exists(folder_path):
+    try:
+        shutil.rmtree(folder_path)
+        st.info("♻️ ลบฐานข้อมูลเก่าเรียบร้อย กำลังดาวน์โหลดใหม่...")
+    except Exception as e:
+        st.error(f"❌ ลบฐานข้อมูลเก่าไม่สำเร็จ: {e}")
+        st.stop()
+
+# --- ดาวน์โหลดไฟล์ zip vector database จาก Google Drive ---
+st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำ (Vector DB) จาก Google Drive...")
+
+gdrive_file_id = "13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca"
+gdown.download(id=gdrive_file_id, output=zip_file_path, quiet=False, use_cookies=False)
+
+# แตก zip ไฟล์
+with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+    zip_ref.extractall(folder_path)
+
+# ลบไฟล์ zip หลังแตกไฟล์แล้ว
+os.remove(zip_file_path)
+
+st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
 
 # --- โหลด ChromaDB แบบ persistent client ---
 try:
