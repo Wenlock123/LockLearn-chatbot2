@@ -5,7 +5,7 @@ import gdown
 import zipfile
 import streamlit as st
 import requests
-import shutil  # ใช้ลบโฟลเดอร์ฐานข้อมูลเก่า
+import sqlite3
 
 # --- Patch sqlite3 สำหรับ Streamlit Cloud ---
 __import__('pysqlite3')
@@ -21,33 +21,55 @@ st.set_page_config(page_title="LockLearn Lifecoach", page_icon="💖", layout="c
 folder_path = "./chromadb_database_v2"
 zip_file_path = "./chromadb_database_v2.zip"
 
-# --- ลบฐานข้อมูลเก่า (ถ้ามี) เพื่อป้องกัน schema mismatch ---
-if os.path.exists(folder_path):
+# --- ดาวน์โหลดไฟล์ zip vector database จาก Google Drive ถ้าไม่มีฐานข้อมูล ---
+if not os.path.exists(folder_path):
+    st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำ (Vector DB) จาก Google Drive...")
+    
+    # ลิงก์ Google Drive ของไฟล์ zip ที่ให้มา
+    gdrive_file_id = "13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca"
+    gdown.download(id=gdrive_file_id, output=zip_file_path, quiet=False, use_cookies=False)
+    
+    # แตก zip ไฟล์
+    with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+        zip_ref.extractall(folder_path)
+    
+    # ลบไฟล์ zip หลังแตกไฟล์แล้ว (ถ้าต้องการ)
+    os.remove(zip_file_path)
+    
+    st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
+
+# --- ฟังก์ชันตรวจสอบ tenant ในฐานข้อมูล chroma.sqlite3 ---
+def get_existing_tenants(db_path):
+    tenants = []
+    if not os.path.exists(db_path):
+        return tenants
     try:
-        shutil.rmtree(folder_path)
-        st.info("♻️ ลบฐานข้อมูลเก่าเรียบร้อย กำลังดาวน์โหลดใหม่...")
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tenants';")
+        if cursor.fetchone():
+            cursor.execute("SELECT id FROM tenants;")
+            tenants = [row[0] for row in cursor.fetchall()]
+        conn.close()
     except Exception as e:
-        st.error(f"❌ ลบฐานข้อมูลเก่าไม่สำเร็จ: {e}")
-        st.stop()
+        print(f"Error checking tenants: {e}")
+    return tenants
 
-# --- ดาวน์โหลดไฟล์ zip vector database จาก Google Drive ---
-st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำ (Vector DB) จาก Google Drive...")
+# --- โหลด ChromaDB แบบ persistent client และจัดการ tenant ---
+db_sqlite_path = os.path.join(folder_path, "chroma.sqlite3")
 
-gdrive_file_id = "13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca"
-gdown.download(id=gdrive_file_id, output=zip_file_path, quiet=False, use_cookies=False)
+tenants = get_existing_tenants(db_sqlite_path)
+st.write(f"พบ tenants ในฐานข้อมูล: {tenants}")
 
-# แตก zip ไฟล์
-with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
-    zip_ref.extractall(folder_path)
+# เลือก tenant ที่จะใช้
+tenant_to_use = "default_tenant" if "default_tenant" in tenants else (tenants[0] if tenants else None)
 
-# ลบไฟล์ zip หลังแตกไฟล์แล้ว
-os.remove(zip_file_path)
+if tenant_to_use is None:
+    st.error("❌ ไม่พบ tenant ในฐานข้อมูล กรุณาใช้ฐานข้อมูลที่ถูกต้องหรือสร้างฐานข้อมูลใหม่")
+    st.stop()
 
-st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
-
-# --- โหลด ChromaDB แบบ persistent client ---
 try:
-    client = PersistentClient(path=folder_path)
+    client = PersistentClient(path=folder_path, tenant_id=tenant_to_use)
 except Exception as e:
     st.error(f"❌ ไม่สามารถโหลด ChromaDB ได้: {e}")
     st.stop()
