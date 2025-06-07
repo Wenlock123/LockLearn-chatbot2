@@ -1,7 +1,8 @@
-streamlit
-sentence-transformers==2.2.2
-huggingface_hub==0.13.3
+numpy==1.24.4
 chromadb==0.4.24
+sentence-transformers==2.2.2
+streamlit
+huggingface_hub==0.13.3
 requests
 pysqlite3-binary==0.5.3.post1
 gdown>=4.7.1
