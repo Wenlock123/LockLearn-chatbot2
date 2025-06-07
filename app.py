@@ -1,5 +1,10 @@
-import os
 import sys
+
+# Patch sqlite3 ให้ใช้ pysqlite3-binary ซึ่งมี sqlite3 >= 3.35.0
+import pysqlite3
+sys.modules['sqlite3'] = pysqlite3
+
+import os
 import re
 import streamlit as st
 import chromadb
@@ -7,37 +12,26 @@ from sentence_transformers import SentenceTransformer
 import together
 from dotenv import load_dotenv
 
-# --- Patch sqlite3 สำหรับ Streamlit Cloud ---
-# เพื่อแก้ปัญหา sqlite3 ไม่ compatible บน Streamlit Cloud
-__import__('pysqlite3')
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-
 # --- Load environment variables ---
 load_dotenv()
 together_api_key = os.getenv("TOGETHER_API_KEY")
-if not together_api_key:
-    st.error("Please set the TOGETHER_API_KEY in your environment variables.")
-    st.stop()
 
 # --- Load multilingual embedding model on CPU ---
-embedding_model = SentenceTransformer(
-    "sentence-transformers/paraphrase-multilingual-mpnet-base-v2", device="cpu"
-)
+embedding_model = SentenceTransformer("sentence-transformers/paraphrase-multilingual-mpnet-base-v2", device="cpu")
 
-# --- Load Chroma DB persistent client ---
+# --- Load Chroma DB ---
 chroma_client = chromadb.PersistentClient(path="chromadb_database_v2")
 collection = chroma_client.get_or_create_collection("recommendations")
 
-# --- Streamlit app config ---
+# --- App config ---
 st.set_page_config(page_title="LockLearn Coach", page_icon="🧠")
 st.title("🧠 LockLearn: Life Coaching Chatbot")
 
-# --- Initialize session state for chat history ---
+# --- Session state ---
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# --- Utility functions ---
-
+# --- Functions ---
 def is_gibberish_or_typo(text):
     text = text.strip()
     if len(text) <= 2:
@@ -56,14 +50,11 @@ def is_closing_message(text):
 
 def detect_language(text):
     thai_chars = re.findall(r"[\u0E00-\u0E7F]", text)
-    # หากอักษรไทยมากกว่า 30% ของข้อความ ให้ถือเป็นภาษาไทย
     return "th" if len(thai_chars) / max(len(text), 1) > 0.3 else "en"
 
 def retrieve_recommendations(query_embedding, top_k=10):
     results = collection.query(query_embeddings=[query_embedding], n_results=top_k)
-    if results and "documents" in results and results["documents"]:
-        return results["documents"][0]
-    return []
+    return results["documents"][0] if results["documents"] else []
 
 def query_llm_with_chat(prompt, api_key):
     together.api_key = api_key
@@ -74,12 +65,11 @@ def query_llm_with_chat(prompt, api_key):
             {"role": "user", "content": prompt}
         ],
         temperature=0.7,
-        max_tokens=512,
+        max_tokens=512
     )
     return response.choices[0].message.content.strip()
 
-# --- Main Chat UI ---
-
+# --- Chat input ---
 user_input = st.chat_input("Type your concern or question here...")
 
 if user_input:
@@ -132,7 +122,7 @@ Your response should:
     with st.chat_message("assistant", avatar="🧘‍♀️"):
         st.markdown(reply)
 
-# --- Show previous chat messages ---
+# --- Display chat history ---
 for message in st.session_state.chat_history:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
