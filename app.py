@@ -21,8 +21,8 @@ folder_path = "./chromadb_database_v2"
 
 if not os.path.exists(folder_path):
     st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำจาก Google Drive...")
-    # gdown.download_folder จะดาวน์โหลดทั้ง folder จาก Google Drive (ต้องเป็นโฟลเดอร์แชร์สาธารณะ)
-    gdown.download_folder(id=folder_id, quiet=False, use_cookies=False)
+    # เพิ่ม output=folder_path เพื่อดาวน์โหลดลงโฟลเดอร์ที่กำหนด
+    gdown.download_folder(id=folder_id, output=folder_path, quiet=False, use_cookies=False)
     st.success("✅ ดาวน์โหลดเรียบร้อยแล้ว!")
 
 # --- โหลด ChromaDB แบบ persistent client ---
@@ -36,7 +36,6 @@ except Exception as e:
 try:
     collection = client.get_collection(name="recommendations")
 except Exception:
-    # ถ้าไม่มี ให้สร้างใหม่
     collection = client.create_collection(name="recommendations")
 
 # --- โหลด embedding model ---
@@ -70,13 +69,20 @@ def query_llm_with_chat(prompt, api_key):
 
 # --- ฟังก์ชันดึงคำแนะนำจาก ChromaDB ---
 def retrieve_recommendations(question_embedding, top_k=10):
-    results = collection.query(
-        query_embeddings=[question_embedding],
-        n_results=top_k
-    )
-    if results and results.get('documents'):
-        return results['documents'][0]
-    return []
+    try:
+        results = collection.query(
+            query_embeddings=[question_embedding],
+            n_results=top_k
+        )
+        # ตรวจสอบว่ามีเอกสารและข้อมูลคำแนะนำหรือไม่
+        if results and 'documents' in results and len(results['documents']) > 0:
+            # results['documents'][0] เป็น list ของคำแนะนำ
+            return results['documents'][0]
+        else:
+            return []
+    except Exception as e:
+        st.error(f"❌ Error retrieving recommendations: {e}")
+        return []
 
 # --- ฟังก์ชันตรวจข้อความปิดท้าย ---
 def is_closing_message(text):
@@ -113,6 +119,7 @@ if "chat_history" not in st.session_state:
 # --- UI ---
 st.title("💖 LockLearn Lifecoach")
 
+# แสดงประวัติแชทเก่า
 for entry in st.session_state.chat_history:
     with st.chat_message(entry["role"]):
         st.markdown(entry["content"])
@@ -141,7 +148,13 @@ if user_input:
             question_embedding = embedding_model.encode(user_input).tolist()
             recommendations = retrieve_recommendations(question_embedding, top_k=10)
 
-            prompt = f"""
+            if not recommendations:
+                reply = {
+                    "th": "ขอโทษครับ ผมยังไม่มีคำแนะนำที่เกี่ยวข้องกับข้อความของคุณ ลองถามใหม่อีกครั้งนะครับ",
+                    "en": "Sorry, I don't have relevant recommendations for your input yet. Please try again."
+                }[lang]
+            else:
+                prompt = f"""
 User message: "{user_input}"
 
 Step 1: Briefly analyze the user's feelings or situation based on the message above.
@@ -149,10 +162,10 @@ Step 2: Using your analysis and the recommendations below, generate a supportive
 
 Recommendations:
 """
-            for rec in recommendations:
-                prompt += f"- {rec}\n"
+                for rec in recommendations:
+                    prompt += f"- {rec}\n"
 
-            prompt += f"""
+                prompt += f"""
 
 Please respond in {'Thai' if lang == 'th' else 'English'} with a {'polite and warm tone, ending sentences with "ค่ะ"' if lang == 'th' else 'kind and uplifting tone like a supportive female life coach'}.
 
@@ -163,7 +176,7 @@ Your response should:
 - Be concise (1–2 sentences) and encouraging.
 """
 
-            reply = query_llm_with_chat(prompt, api_key)
+                reply = query_llm_with_chat(prompt, api_key)
 
     st.session_state.chat_history.append({"role": "assistant", "content": reply})
     with st.chat_message("assistant", avatar="🧘‍♀️"):
