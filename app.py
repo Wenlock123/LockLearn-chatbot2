@@ -99,7 +99,7 @@ def is_gibberish_or_typo(text):
 def is_closing_message(text):
     closing_patterns = [
         r"^ขอบคุณ.*", r"^ขอบใจ.*", r"^โอเค.*", r"^เข้าใจ.*", r"^ได้เลย.*", r"^รับทราบ.*",
-        r"^thank(s| you).*", r"^ok.*", r"^got it.*", r"^noted.*", r"^understood.*"
+        r"^thank(s| you).*"," r"^ok.*", r"^got it.*", r"^noted.*", r"^understood.*"
     ]
     text = text.strip().lower()
     if len(text.split()) <= 5:
@@ -148,7 +148,7 @@ if user_input:
             recommendations = retrieve_recommendations(question_embedding, top_k=10)
 
             prompt = f"""
-User message: "{user_input}"
+User message: \"{user_input}\"
 
 Step 1: Briefly analyze the user's feelings or situation based on the message above.
 Step 2: Using your analysis and the recommendations below, generate a supportive and practical response.
@@ -160,7 +160,7 @@ Recommendations:
 
             prompt += f"""
 
-Please respond in {'Thai' if lang == 'th' else 'English'} with a {'polite and warm tone, ending sentences with "ค่ะ"' if lang == 'th' else 'kind and uplifting tone like a supportive female life coach'}.
+Please respond in {'Thai' if lang == 'th' else 'English'} with a {'polite and warm tone, ending sentences with \"ค่ะ\"' if lang == 'th' else 'kind and uplifting tone like a supportive female life coach'}.
 
 Your response should:
 - Reflect understanding of the user's feelings or situation.
