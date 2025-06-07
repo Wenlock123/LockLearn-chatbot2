@@ -1,7 +1,6 @@
 import os
 import sys
 import re
-import shutil
 import gdown
 import zipfile
 import streamlit as st
@@ -21,24 +20,22 @@ st.set_page_config(page_title="LockLearn Lifecoach", page_icon="💖", layout="c
 folder_path = "./chromadb_database_v2"
 zip_file_path = "./chromadb_database_v2.zip"
 
-# --- ลบฐานข้อมูลเก่า (ถ้ามี) เพื่อป้องกัน schema ไม่ตรงกัน ---
-if os.path.exists(folder_path):
-    shutil.rmtree(folder_path)
-
-# --- ดาวน์โหลดไฟล์ zip vector database จาก Google Drive ---
-st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำ (Vector DB) จาก Google Drive...")
-
-gdrive_file_id = "13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca"
-gdown.download(id=gdrive_file_id, output=zip_file_path, quiet=False, use_cookies=False)
-
-# แตก zip ไฟล์
-with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
-    zip_ref.extractall(folder_path)
-
-# ลบไฟล์ zip หลังแตกไฟล์แล้ว
-os.remove(zip_file_path)
-
-st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
+# --- ดาวน์โหลดไฟล์ zip vector database จาก Google Drive ถ้าไม่มีฐานข้อมูล ---
+if not os.path.exists(folder_path):
+    st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำ (Vector DB) จาก Google Drive...")
+    
+    # ลิงก์ Google Drive ของไฟล์ zip ที่ให้มา
+    gdrive_file_id = "13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca"
+    gdown.download(id=gdrive_file_id, output=zip_file_path, quiet=False, use_cookies=False)
+    
+    # แตก zip ไฟล์
+    with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+        zip_ref.extractall(folder_path)
+    
+    # ลบไฟล์ zip หลังแตกไฟล์แล้ว (ถ้าต้องการ)
+    os.remove(zip_file_path)
+    
+    st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
 
 # --- โหลด ChromaDB แบบ persistent client ---
 try:
@@ -127,6 +124,7 @@ if "chat_history" not in st.session_state:
 # --- UI ---
 st.title("💖 LockLearn Lifecoach")
 
+# แสดงข้อความในประวัติแชท
 for entry in st.session_state.chat_history:
     with st.chat_message(entry["role"]):
         st.markdown(entry["content"])
