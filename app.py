@@ -1,11 +1,11 @@
 import os
 import sys
 import re
+import shutil
 import gdown
 import zipfile
 import streamlit as st
 import requests
-import sqlite3
 
 # --- Patch sqlite3 สำหรับ Streamlit Cloud ---
 __import__('pysqlite3')
@@ -18,66 +18,31 @@ from sentence_transformers import SentenceTransformer
 st.set_page_config(page_title="LockLearn Lifecoach", page_icon="💖", layout="centered")
 
 # --- กำหนด path สำหรับฐานข้อมูล ---
-folder_path = "./chromadb_database_v2/chromadb_database_v2"  # แก้ไขตรงนี้ให้ชี้ไป path ที่ถูกต้องของฐานข้อมูล
+folder_path = "./chromadb_database_v2"
 zip_file_path = "./chromadb_database_v2.zip"
 
-# --- ดาวน์โหลดไฟล์ zip vector database จาก Google Drive ถ้าไม่มีฐานข้อมูล ---
-if not os.path.exists(folder_path):
-    st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำ (Vector DB) จาก Google Drive...")
+# --- ลบฐานข้อมูลเก่า (ถ้ามี) เพื่อป้องกัน schema ไม่ตรงกัน ---
+if os.path.exists(folder_path):
+    shutil.rmtree(folder_path)
 
-    # ลิงก์ Google Drive ของไฟล์ zip ที่ให้มา
-    gdrive_file_id = "13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca"
-    gdown.download(id=gdrive_file_id, output=zip_file_path, quiet=False, use_cookies=False)
+# --- ดาวน์โหลดไฟล์ zip vector database จาก Google Drive ---
+st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำ (Vector DB) จาก Google Drive...")
 
-    # แตก zip ไฟล์
-    with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
-        zip_ref.extractall("./chromadb_database_v2")  # แตกไฟล์ในโฟลเดอร์แม่
+gdrive_file_id = "13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca"
+gdown.download(id=gdrive_file_id, output=zip_file_path, quiet=False, use_cookies=False)
 
-    # ลบไฟล์ zip หลังแตกไฟล์แล้ว (ถ้าต้องการ)
-    os.remove(zip_file_path)
+# แตก zip ไฟล์
+with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+    zip_ref.extractall(folder_path)
 
-    st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
+# ลบไฟล์ zip หลังแตกไฟล์แล้ว
+os.remove(zip_file_path)
 
-# --- ฟังก์ชันตรวจสอบ tenant ในฐานข้อมูล chroma.sqlite3 ---
-def get_existing_tenants(db_path):
-    tenants = []
-    if not os.path.exists(db_path):
-        return tenants
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tenants';")
-        if cursor.fetchone():
-            cursor.execute("SELECT id FROM tenants;")
-            tenants = [row[0] for row in cursor.fetchall()]
-        conn.close()
-    except Exception as e:
-        print(f"Error checking tenants: {e}")
-    return tenants
+st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
 
-# --- โหลด ChromaDB แบบ persistent client และจัดการ tenant ---
-db_sqlite_path = os.path.join(folder_path, "chroma.sqlite3")
-
-tenants = get_existing_tenants(db_sqlite_path)
-st.write(f"พบ tenants ในฐานข้อมูล: {tenants}")
-
-# สร้าง tenant เองถ้าไม่มี tenant
-if not tenants:
-    st.warning("⚠️ ไม่พบ tenant ในฐานข้อมูล จะสร้าง tenant ใหม่ชื่อ 'default_tenant' ให้แทน")
-    # สร้าง PersistentClient ชั่วคราว (ไม่ระบุ tenant)
-    try:
-        client_tmp = PersistentClient(path=folder_path)
-        client_tmp.create_tenant("default_tenant")
-        tenants = ["default_tenant"]
-        client_tmp.close()
-    except Exception as e:
-        st.error(f"❌ สร้าง tenant ไม่สำเร็จ: {e}")
-        st.stop()
-
-tenant_to_use = "default_tenant" if "default_tenant" in tenants else tenants[0]
-
+# --- โหลด ChromaDB แบบ persistent client ---
 try:
-    client = PersistentClient(path=folder_path, tenant_id=tenant_to_use)
+    client = PersistentClient(path=folder_path)
 except Exception as e:
     st.error(f"❌ ไม่สามารถโหลด ChromaDB ได้: {e}")
     st.stop()
@@ -162,7 +127,6 @@ if "chat_history" not in st.session_state:
 # --- UI ---
 st.title("💖 LockLearn Lifecoach")
 
-# แสดงข้อความในประวัติแชท
 for entry in st.session_state.chat_history:
     with st.chat_message(entry["role"]):
         st.markdown(entry["content"])
