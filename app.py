@@ -1,3 +1,4 @@
+# --- Imports ---
 import os
 import sys
 import re
@@ -25,41 +26,33 @@ unpacked_folder_name = "chromadb_database_v2"
 if os.path.exists(unpacked_folder_name):
     shutil.rmtree(unpacked_folder_name)
 
-# --- ดาวน์โหลดไฟล์ ZIP จาก Google Drive ---
-st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำ (Vector DB) จาก Google Drive...")
+# --- ดาวน์โหลด ZIP จาก Google Drive ---
+st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำจาก Google Drive...")
+gdown.download(id="13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca", output=zip_file_path, quiet=False)
 
-gdrive_file_id = "13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca"
-gdown.download(id=gdrive_file_id, output=zip_file_path, quiet=False, use_cookies=False)
-
-# --- แตกไฟล์ ZIP ไปยังโฟลเดอร์ปัจจุบัน ---
+# --- แตกไฟล์ ZIP ---
 with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
     zip_ref.extractall(".")
 
-# --- ลบไฟล์ ZIP หลังแตกไฟล์แล้ว ---
+# --- ลบไฟล์ ZIP ---
 os.remove(zip_file_path)
+st.success("✅ ดาวน์โหลดและแตกไฟล์เรียบร้อยแล้ว!")
 
-st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
-
-# --- โหลด ChromaDB แบบ persistent client ---
+# --- โหลด ChromaDB ---
 try:
     client = PersistentClient(path=unpacked_folder_name)
+    collection = client.get_collection(name="recommendations")
 except Exception as e:
     st.error(f"❌ ไม่สามารถโหลด ChromaDB ได้: {e}")
     st.stop()
 
-# --- เช็คว่ามี collection "recommendations" หรือยัง ---
-try:
-    collection = client.get_collection(name="recommendations")
-except Exception:
-    collection = client.create_collection(name="recommendations")
-
 # --- โหลด embedding model ---
 embedding_model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2')
 
-# --- โหลด API Key จาก secrets.toml ---
+# --- โหลด API key ---
 api_key = st.secrets["TOGETHER_API_KEY"]
 
-# --- ฟังก์ชันเรียก LLaMA 4 Scout ผ่าน Together AI ---
+# --- ฟังก์ชันเรียก LLaMA 4 Scout ---
 def query_llm_with_chat(prompt, api_key):
     url = "https://api.together.xyz/v1/chat/completions"
     headers = {
@@ -82,17 +75,12 @@ def query_llm_with_chat(prompt, api_key):
     except Exception as e:
         return f"❌ Request failed: {e}"
 
-# --- ฟังก์ชันดึงคำแนะนำจาก ChromaDB ---
+# --- ฟังก์ชันดึงคำแนะนำ ---
 def retrieve_recommendations(question_embedding, top_k=10):
-    results = collection.query(
-        query_embeddings=[question_embedding],
-        n_results=top_k
-    )
-    if results and results.get('documents'):
-        return results['documents'][0]
-    return []
+    results = collection.query(query_embeddings=[question_embedding], n_results=top_k)
+    return results['documents'][0] if results and results.get('documents') else []
 
-# --- ฟังก์ชันตรวจข้อความปิดท้าย ---
+# --- ตรวจข้อความปิดท้าย ---
 def is_closing_message(text):
     closing_patterns = [
         r"^ขอบคุณ.*", r"^ขอบใจ.*", r"^โอเค.*", r"^เข้าใจ.*", r"^ได้เลย.*", r"^รับทราบ.*",
@@ -100,12 +88,10 @@ def is_closing_message(text):
     ]
     text = text.strip().lower()
     if len(text.split()) <= 5:
-        for pattern in closing_patterns:
-            if re.match(pattern, text):
-                return True
+        return any(re.match(pattern, text) for pattern in closing_patterns)
     return False
 
-# --- ฟังก์ชันตรวจ gibberish หรือ typo ง่ายๆ ---
+# --- ตรวจ gibberish / typo ---
 def is_gibberish_or_typo(text):
     text = text.strip()
     if len(text) <= 2:
@@ -115,12 +101,12 @@ def is_gibberish_or_typo(text):
         return True
     return False
 
-# --- ฟังก์ชันตรวจภาษาแบบง่าย ---
+# --- ตรวจภาษา ---
 def detect_language(text):
     thai_chars = re.findall(r'[\u0E00-\u0E7F]', text)
     return "th" if len(thai_chars) / max(len(text), 1) > 0.3 else "en"
 
-# --- Session state สำหรับเก็บประวัติแชท ---
+# --- Session state ---
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
