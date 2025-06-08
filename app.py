@@ -21,34 +21,45 @@ st.set_page_config(page_title="LockLearn Lifecoach", page_icon="💖", layout="c
 folder_path = "./chromadb_database_v2"
 zip_file_path = "./chromadb_database_v2.zip"
 
-# --- ดาวน์โหลด zip จาก Google Drive หากยังไม่มีโฟลเดอร์ ---
-if not os.path.exists(folder_path):
-    st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำ (Vector DB) จาก Google Drive...")
+# --- ลบฐานข้อมูลเก่า (ถ้ามี) เพื่อป้องกัน schema ไม่ตรงกัน ---
+if os.path.exists(folder_path):
+    shutil.rmtree(folder_path)
 
-    gdrive_file_id = "1czCTZUvq-ooRt6_-YL_hzYTYDuOdmNpB"
-    gdown.download(id=gdrive_file_id, output=zip_file_path, quiet=False, use_cookies=False)
+# --- ดาวน์โหลดไฟล์ zip vector database จาก Google Drive ---
+st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำ (Vector DB) จาก Google Drive...")
 
-    with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
-        zip_ref.extractall(folder_path)
+# ✅ แก้ไข ID ใหม่ล่าสุดตรงนี้
+gdrive_file_id = "1czCTZUvq-ooRt6_-YL_hzYTYDuOdmNpB"
+gdown.download(id=gdrive_file_id, output=zip_file_path, quiet=False, use_cookies=False)
 
-    os.remove(zip_file_path)
+# แตก zip ไฟล์
+with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+    zip_ref.extractall(folder_path)
 
-    st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
+os.remove(zip_file_path)
 
-# --- โหลด ChromaDB ---
+st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
+
+# --- โหลด ChromaDB แบบ persistent client ---
 try:
     client = PersistentClient(path=folder_path)
 except Exception as e:
     st.error(f"❌ ไม่สามารถโหลด ChromaDB ได้: {e}")
     st.stop()
 
+# --- โหลด collection ---
 try:
     collection = client.get_collection(name="recommendations")
 except Exception:
     collection = client.create_collection(name="recommendations")
 
-# --- โหลด embedding model ที่คุณเลือก ---
-embedding_model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2', device='cpu')
+# --- โหลด embedding model ---
+try:
+    embedding_model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2', device='cpu')
+    st.info("✅ โหลด embedding model paraphrase-multilingual-mpnet-base-v2 สำเร็จแล้ว (CPU mode)")
+except Exception as e:
+    st.error(f"❌ โหลด embedding model ล้มเหลว: {e}")
+    st.stop()
 
 # --- โหลด API Key ---
 api_key = st.secrets["TOGETHER_API_KEY"]
@@ -63,9 +74,9 @@ def query_llm_with_chat(prompt, api_key):
     payload = {
         "model": "meta-llama/llama-4-scout-17b-16e-instruct",
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.5,
+        "temperature": 0.7,
         "top_p": 0.9,
-        "max_tokens": 256,
+        "max_tokens": 512,
     }
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=15)
@@ -116,15 +127,22 @@ if user_input:
     lang = detect_language(user_input)
 
     if is_gibberish_or_typo(user_input):
-        reply = {"th": "😅 ผมไม่แน่ใจว่าคุณหมายถึงอะไร ลองพิมพ์ใหม่อีกครั้งนะครับ", "en": "😅 I'm not sure what you mean. Could you try rephrasing it?"}[lang]
+        reply = {
+            "th": "😅 ผมไม่แน่ใจว่าคุณหมายถึงอะไร ลองพิมพ์ใหม่อีกครั้งนะครับ",
+            "en": "😅 I'm not sure what you mean. Could you try rephrasing it?"
+        }[lang]
     elif is_closing_message(user_input):
-        reply = {"th": "😊 ยินดีเสมอครับ หากต้องการคำแนะนำเพิ่มเติมสามารถถามได้ตลอดเลยนะครับ!", "en": "😊 You're always welcome! Feel free to ask if you need more support!"}[lang]
+        reply = {
+            "th": "😊 ยินดีเสมอครับ หากต้องการคำแนะนำเพิ่มเติมสามารถถามได้ตลอดเลยนะครับ!",
+            "en": "😊 You're always welcome! Feel free to ask if you need more support!"
+        }[lang]
     else:
         with st.spinner("Thinking..."):
-            question_embedding = embedding_model.encode(user_input).tolist()
-            recommendations = retrieve_recommendations(question_embedding, top_k=10)
+            try:
+                question_embedding = embedding_model.encode(user_input).tolist()
+                recommendations = retrieve_recommendations(question_embedding, top_k=10)
 
-            prompt = f"""
+                prompt = f"""
 User message: "{user_input}"
 
 Step 1: Briefly analyze the user's feelings or situation based on the message above.
@@ -132,10 +150,10 @@ Step 2: Using your analysis and the recommendations below, generate a supportive
 
 Recommendations:
 """
-            for rec in recommendations:
-                prompt += f"- {rec}\n"
+                for rec in recommendations:
+                    prompt += f"- {rec}\n"
 
-            prompt += f"""
+                prompt += f"""
 
 Please respond in {'Thai' if lang == 'th' else 'English'} with a {'polite and warm tone, ending sentences with "ค่ะ"' if lang == 'th' else 'kind and uplifting tone like a supportive female life coach'}.
 
@@ -145,7 +163,9 @@ Your response should:
 - Avoid repeating the user's exact words or the recommendations verbatim.
 - Be concise (1–2 sentences) and encouraging.
 """
-            reply = query_llm_with_chat(prompt, api_key)
+                reply = query_llm_with_chat(prompt, api_key)
+            except Exception as e:
+                reply = f"❌ เกิดข้อผิดพลาดระหว่างประมวลผล: {e}"
 
     st.session_state.chat_history.append({"role": "assistant", "content": reply})
     with st.chat_message("assistant", avatar="🧘‍♀️"):
