@@ -2,10 +2,10 @@ import os
 import sys
 import re
 import shutil
+import gdown
 import zipfile
 import streamlit as st
 import requests
-import gdown
 
 # --- Patch sqlite3 สำหรับ Streamlit Cloud ---
 __import__('pysqlite3')
@@ -20,14 +20,12 @@ st.set_page_config(page_title="LockLearn Lifecoach", page_icon="💖", layout="c
 # --- กำหนด path สำหรับฐานข้อมูล ---
 folder_path = "./chromadb_database_v2"
 zip_file_path = "./chromadb_database_v2.zip"
-gdrive_file_id = "1czCTZUvq-ooRt6_-YL_hzYTYDuOdmNpB"
 
-# --- ดาวน์โหลด zip ไฟล์จาก Google Drive หากยังไม่มีโฟลเดอร์ ---
-@st.cache_data(show_spinner="📦 กำลังดาวน์โหลดฐานข้อมูลจาก Google Drive...")
-def download_and_extract_database():
-    if os.path.exists(folder_path):
-        shutil.rmtree(folder_path)  # ลบฐานข้อมูลเก่าเพื่อป้องกัน schema conflict
+# --- ดาวน์โหลด zip จาก Google Drive หากยังไม่มีโฟลเดอร์ ---
+if not os.path.exists(folder_path):
+    st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำ (Vector DB) จาก Google Drive...")
 
+    gdrive_file_id = "1czCTZUvq-ooRt6_-YL_hzYTYDuOdmNpB"
     gdown.download(id=gdrive_file_id, output=zip_file_path, quiet=False, use_cookies=False)
 
     with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
@@ -35,28 +33,27 @@ def download_and_extract_database():
 
     os.remove(zip_file_path)
 
-download_and_extract_database()
-st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
+    st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
 
 # --- โหลด ChromaDB ---
 try:
     client = PersistentClient(path=folder_path)
-    collection = client.get_collection(name="recommendations")
 except Exception as e:
     st.error(f"❌ ไม่สามารถโหลด ChromaDB ได้: {e}")
     st.stop()
 
-# --- โหลด embedding model (cache ไว้) ---
-@st.cache_resource
-def load_embedding_model():
-    return SentenceTransformer('paraphrase-multilingual-mpnet-base-v2')
+try:
+    collection = client.get_collection(name="recommendations")
+except Exception:
+    collection = client.create_collection(name="recommendations")
 
-embedding_model = load_embedding_model()
+# --- โหลด embedding model ที่คุณเลือก ---
+embedding_model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2', device='cpu')
 
 # --- โหลด API Key ---
 api_key = st.secrets["TOGETHER_API_KEY"]
 
-# --- เรียก LLM ---
+# --- ฟังก์ชันเรียก LLM ---
 def query_llm_with_chat(prompt, api_key):
     url = "https://api.together.xyz/v1/chat/completions"
     headers = {
@@ -66,9 +63,9 @@ def query_llm_with_chat(prompt, api_key):
     payload = {
         "model": "meta-llama/llama-4-scout-17b-16e-instruct",
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.7,
+        "temperature": 0.5,
         "top_p": 0.9,
-        "max_tokens": 512,
+        "max_tokens": 256,
     }
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=15)
@@ -79,20 +76,22 @@ def query_llm_with_chat(prompt, api_key):
     except Exception as e:
         return f"❌ Request failed: {e}"
 
-# --- คำสั่งดึงคำแนะนำจาก ChromaDB ---
+# --- ดึงคำแนะนำจาก ChromaDB ---
 def retrieve_recommendations(question_embedding, top_k=10):
     results = collection.query(query_embeddings=[question_embedding], n_results=top_k)
     return results['documents'][0] if results and results.get('documents') else []
 
-# --- ตรวจข้อความ ---
+# --- ตรวจ closing message ---
 def is_closing_message(text):
     patterns = [r"^ขอบคุณ.*", r"^โอเค.*", r"^เข้าใจ.*", r"^รับทราบ.*", r"^thank.*", r"^ok.*", r"^noted.*"]
     return any(re.match(p, text.strip().lower()) for p in patterns if len(text.split()) <= 5)
 
+# --- ตรวจ gibberish/typo ---
 def is_gibberish_or_typo(text):
     text = text.strip()
     return len(text) <= 2 or (len(text.split()) == 1 and not re.search(r'[a-zA-Zก-๙]', text))
 
+# --- ตรวจภาษา ---
 def detect_language(text):
     return "th" if len(re.findall(r'[\u0E00-\u0E7F]', text)) / max(len(text), 1) > 0.3 else "en"
 
@@ -123,7 +122,7 @@ if user_input:
     else:
         with st.spinner("Thinking..."):
             question_embedding = embedding_model.encode(user_input).tolist()
-            recommendations = retrieve_recommendations(question_embedding)
+            recommendations = retrieve_recommendations(question_embedding, top_k=10)
 
             prompt = f"""
 User message: "{user_input}"
