@@ -12,7 +12,6 @@ __import__('pysqlite3')
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 from chromadb import PersistentClient
-from sentence_transformers import SentenceTransformer
 
 # --- ตั้งค่าหน้า Streamlit ---
 st.set_page_config(page_title="LockLearn Lifecoach", page_icon="💖", layout="centered")
@@ -25,46 +24,47 @@ zip_file_path = "./chromadb_database_v2.zip"
 if os.path.exists(folder_path):
     shutil.rmtree(folder_path)
 
-# --- ดาวน์โหลดไฟล์ zip vector database จาก Google Drive ---
+# --- ดาวน์โหลดฐานข้อมูลจาก Google Drive ---
 st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำ (Vector DB) จาก Google Drive...")
 
-# ✅ แก้ไข ID ใหม่ล่าสุดตรงนี้
 gdrive_file_id = "1czCTZUvq-ooRt6_-YL_hzYTYDuOdmNpB"
 gdown.download(id=gdrive_file_id, output=zip_file_path, quiet=False, use_cookies=False)
 
-# แตก zip ไฟล์
 with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
     zip_ref.extractall(folder_path)
 
 os.remove(zip_file_path)
-
 st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
 
-# --- โหลด ChromaDB แบบ persistent client ---
+# --- โหลด ChromaDB ---
 try:
     client = PersistentClient(path=folder_path)
+    collection = client.get_collection(name="recommendations")
 except Exception as e:
     st.error(f"❌ ไม่สามารถโหลด ChromaDB ได้: {e}")
     st.stop()
 
-# --- โหลด collection ---
-try:
-    collection = client.get_collection(name="recommendations")
-except Exception:
-    collection = client.create_collection(name="recommendations")
+# --- โหลด Secrets ---
+together_api_key = st.secrets["TOGETHER_API_KEY"]
+hf_token = st.secrets["HUGGINGFACE_API_TOKEN"]
 
-# --- โหลด embedding model ---
-try:
-    embedding_model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2', device='cpu')
-    st.info("✅ โหลด embedding model paraphrase-multilingual-mpnet-base-v2 สำเร็จแล้ว (CPU mode)")
-except Exception as e:
-    st.error(f"❌ โหลด embedding model ล้มเหลว: {e}")
-    st.stop()
+# --- ฝังข้อความด้วย Hugging Face API ---
+def get_embedding_via_hf_api(text, hf_token):
+    API_URL = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+    headers = {"Authorization": f"Bearer {hf_token}"}
+    payload = {"inputs": text, "options": {"wait_for_model": True}}
 
-# --- โหลด API Key ---
-api_key = st.secrets["TOGETHER_API_KEY"]
+    try:
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=10)
+        if response.status_code == 200:
+            return response.json()[0]
+        else:
+            raise RuntimeError(f"HF API error {response.status_code}: {response.text}")
+    except Exception as e:
+        st.error(f"❌ เกิดข้อผิดพลาดขณะเรียก Hugging Face Inference API: {e}")
+        st.stop()
 
-# --- ฟังก์ชันเรียก LLM ---
+# --- เรียก LLM จาก Together API ---
 def query_llm_with_chat(prompt, api_key):
     url = "https://api.together.xyz/v1/chat/completions"
     headers = {
@@ -97,7 +97,7 @@ def is_closing_message(text):
     patterns = [r"^ขอบคุณ.*", r"^โอเค.*", r"^เข้าใจ.*", r"^รับทราบ.*", r"^thank.*", r"^ok.*", r"^noted.*"]
     return any(re.match(p, text.strip().lower()) for p in patterns if len(text.split()) <= 5)
 
-# --- ตรวจ gibberish/typo ---
+# --- ตรวจข้อความผิดพลาด ---
 def is_gibberish_or_typo(text):
     text = text.strip()
     return len(text) <= 2 or (len(text.split()) == 1 and not re.search(r'[a-zA-Zก-๙]', text))
@@ -110,7 +110,7 @@ def detect_language(text):
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# --- UI ---
+# --- UI หลัก ---
 st.title("💖 LockLearn Lifecoach")
 
 for entry in st.session_state.chat_history:
@@ -139,7 +139,7 @@ if user_input:
     else:
         with st.spinner("Thinking..."):
             try:
-                question_embedding = embedding_model.encode(user_input).tolist()
+                question_embedding = get_embedding_via_hf_api(user_input, hf_token)
                 recommendations = retrieve_recommendations(question_embedding, top_k=10)
 
                 prompt = f"""
@@ -149,11 +149,7 @@ Step 1: Briefly analyze the user's feelings or situation based on the message ab
 Step 2: Using your analysis and the recommendations below, generate a supportive and practical response.
 
 Recommendations:
-"""
-                for rec in recommendations:
-                    prompt += f"- {rec}\n"
-
-                prompt += f"""
+""" + "\n".join(f"- {rec}" for rec in recommendations) + f"""
 
 Please respond in {'Thai' if lang == 'th' else 'English'} with a {'polite and warm tone, ending sentences with "ค่ะ"' if lang == 'th' else 'kind and uplifting tone like a supportive female life coach'}.
 
@@ -163,7 +159,7 @@ Your response should:
 - Avoid repeating the user's exact words or the recommendations verbatim.
 - Be concise (1–2 sentences) and encouraging.
 """
-                reply = query_llm_with_chat(prompt, api_key)
+                reply = query_llm_with_chat(prompt, together_api_key)
             except Exception as e:
                 reply = f"❌ เกิดข้อผิดพลาดระหว่างประมวลผล: {e}"
 
