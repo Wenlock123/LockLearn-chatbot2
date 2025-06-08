@@ -151,16 +151,18 @@ Recommendations:
                 for rec in recommendations:
                     prompt += f"- {rec}\n"
 
-                prompt += f"""
+                prompt += """
+Please generate a supportive, practical, and encouraging response based on the suggestions above.
+Respond in the same language as the user's question:
+- Thai if the question is in Thai.
+- English if the question is in English.
 
-Please respond in {'Thai' if lang == 'th' else 'English'} with a {'polite and warm tone, ending sentences with "ค่ะ"' if lang == 'th' else 'kind and uplifting tone like a supportive female life coach'}.
+If the user's question is in Thai, respond in a polite and feminine tone using "ค่ะ" at the end of the sentence, as if you are a female life coach giving kind, warm, and caring motivation.
+If the user's question is in English, keep a kind and uplifting tone like a supportive female life coach.
 
-Your response should:
-- Reflect understanding of the user's feelings or situation.
-- Naturally incorporate relevant recommendations.
-- Avoid repeating the user's exact words or the recommendations verbatim.
-- Be concise (1–2 sentences) and encouraging.
+Keep the response concise (1–2 sentences), natural, and motivating.
 """
+
                 reply = query_llm_with_chat(prompt, api_key)
             except Exception as e:
                 reply = f"❌ เกิดข้อผิดพลาดระหว่างประมวลผล: {e}"
