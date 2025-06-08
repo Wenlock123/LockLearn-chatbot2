@@ -21,46 +21,38 @@ st.set_page_config(page_title="LockLearn Lifecoach", page_icon="💖", layout="c
 folder_path = "./chromadb_database_v2"
 zip_file_path = "./chromadb_database_v2.zip"
 
-# --- ลบฐานข้อมูลเก่า (ถ้ามี) เพื่อป้องกัน schema ไม่ตรงกัน ---
+# --- ลบฐานข้อมูลเก่า (ถ้ามี) ---
 if os.path.exists(folder_path):
     shutil.rmtree(folder_path)
 
-# --- ดาวน์โหลดไฟล์ zip vector database จาก Google Drive ---
-st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำ (Vector DB) จาก Google Drive...")
+# --- ดาวน์โหลดฐานข้อมูลจาก Google Drive ---
+st.info("📦 กำลังดาวน์โหลดฐานข้อมูลคำแนะนำ (Vector DB)...")
 
 gdrive_file_id = "13MOEZbfRTuqM9g2ZJWllwynKbItB-7Ca"
 gdown.download(id=gdrive_file_id, output=zip_file_path, quiet=False, use_cookies=False)
 
-# แตก zip ไฟล์
 with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
     zip_ref.extractall(folder_path)
-
-# ลบไฟล์ zip หลังแตกไฟล์แล้ว
 os.remove(zip_file_path)
 
 st.success("✅ ดาวน์โหลดและแตกไฟล์ฐานข้อมูลเรียบร้อยแล้ว!")
 
-# --- โหลด ChromaDB แบบ persistent client ---
+# --- โหลด ChromaDB ---
 try:
     client = PersistentClient(path=folder_path)
-except Exception as e:
-    st.error(f"❌ ไม่สามารถโหลด ChromaDB ได้: {e}")
-    st.stop()
-
-# --- เช็คว่ามี collection "recommendations" หรือยัง ---
-try:
     collection = client.get_collection(name="recommendations")
-except Exception:
-    collection = client.create_collection(name="recommendations")
+except Exception as e:
+    st.error(f"❌ โหลด ChromaDB ไม่สำเร็จ: {e}")
+    st.stop()
 
 # --- โหลด embedding model ---
 embedding_model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2')
 
-# --- โหลด API Key จาก secrets.toml ---
+# --- โหลด API Key ---
 api_key = st.secrets["TOGETHER_API_KEY"]
 
-# --- ฟังก์ชันเรียก LLaMA 4 Scout ผ่าน Together AI ---
-def query_llm_with_chat(prompt, api_key):
+# --- ฟังก์ชันเรียก LLaMA 4 Scout ---
+def query_llm(prompt, api_key):
     url = "https://api.together.xyz/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -74,64 +66,46 @@ def query_llm_with_chat(prompt, api_key):
         "max_tokens": 512,
     }
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=15)
-        if response.status_code == 200:
-            return response.json()["choices"][0]["message"]["content"].strip()
+        r = requests.post(url, headers=headers, json=payload, timeout=15)
+        if r.status_code == 200:
+            return r.json()["choices"][0]["message"]["content"].strip()
         else:
-            return f"❌ API Error {response.status_code}: {response.text}"
+            return f"❌ API Error {r.status_code}: {r.text}"
     except Exception as e:
         return f"❌ Request failed: {e}"
 
-# --- ฟังก์ชันดึงคำแนะนำจาก ChromaDB ---
-def retrieve_recommendations(question_embedding, top_k=10):
-    results = collection.query(
-        query_embeddings=[question_embedding],
-        n_results=top_k
-    )
-    if results and results.get('documents'):
-        return results['documents'][0]
-    return []
+# --- ดึงคำแนะนำจาก ChromaDB ---
+def retrieve_recommendations(embedding, top_k=10):
+    try:
+        result = collection.query(query_embeddings=[embedding], n_results=top_k)
+        return result['documents'][0] if result and result.get('documents') else []
+    except Exception:
+        return []
 
-# --- ฟังก์ชันตรวจข้อความปิดท้าย ---
-def is_closing_message(text):
-    closing_patterns = [
-        r"^ขอบคุณ.*", r"^ขอบใจ.*", r"^โอเค.*", r"^เข้าใจ.*", r"^ได้เลย.*", r"^รับทราบ.*",
-        r"^thank(s| you).*", r"^ok.*", r"^got it.*", r"^noted.*", r"^understood.*"
-    ]
-    text = text.strip().lower()
-    if len(text.split()) <= 5:
-        for pattern in closing_patterns:
-            if re.match(pattern, text):
-                return True
-    return False
+# --- ตรวจปิดข้อความ / gibberish / ภาษา ---
+def is_closing(text):
+    patterns = [r"^ขอบคุณ", r"^ok", r"^เข้าใจ", r"^โอเค", r"^รับทราบ", r"^got it", r"^noted"]
+    return any(re.match(p, text.strip().lower()) for p in patterns if len(text.split()) <= 5)
 
-# --- ฟังก์ชันตรวจ gibberish หรือ typo ง่ายๆ ---
-def is_gibberish_or_typo(text):
-    text = text.strip()
-    if len(text) <= 2:
-        return True
-    words = text.split()
-    if len(words) == 1 and not re.search(r'[a-zA-Zก-๙]', words[0]):
-        return True
-    return False
+def is_typo(text):
+    return len(text.strip()) <= 2 or (len(text.split()) == 1 and not re.search(r'[a-zA-Zก-๙]', text))
 
-# --- ฟังก์ชันตรวจภาษาแบบง่าย ---
 def detect_language(text):
-    thai_chars = re.findall(r'[\u0E00-\u0E7F]', text)
-    return "th" if len(thai_chars) / max(len(text), 1) > 0.3 else "en"
+    th_chars = re.findall(r'[\u0E00-\u0E7F]', text)
+    return "th" if len(th_chars) / max(len(text), 1) > 0.3 else "en"
 
-# --- Session state สำหรับเก็บประวัติแชท ---
+# --- Session state ---
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
 # --- UI ---
 st.title("💖 LockLearn Lifecoach")
 
-for entry in st.session_state.chat_history:
-    with st.chat_message(entry["role"]):
-        st.markdown(entry["content"])
+for msg in st.session_state.chat_history:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-user_input = st.chat_input("How can I support you today?")
+user_input = st.chat_input("พิมพ์ข้อความของคุณที่นี่...")
 
 if user_input:
     st.session_state.chat_history.append({"role": "user", "content": user_input})
@@ -140,44 +114,35 @@ if user_input:
 
     lang = detect_language(user_input)
 
-    if is_gibberish_or_typo(user_input):
-        reply = {
-            "th": "😅 ผมไม่แน่ใจว่าคุณหมายถึงอะไร ลองพิมพ์ใหม่อีกครั้งนะครับ",
-            "en": "😅 I'm not sure what you mean. Could you try rephrasing it?"
-        }[lang]
-    elif is_closing_message(user_input):
-        reply = {
-            "th": "😊 ยินดีเสมอครับ หากต้องการคำแนะนำเพิ่มเติมสามารถถามได้ตลอดเลยนะครับ!",
-            "en": "😊 You're always welcome! Feel free to ask if you need more support!"
-        }[lang]
+    if is_typo(user_input):
+        reply = "😅 ผมไม่แน่ใจว่าคุณหมายถึงอะไร ลองพิมพ์ใหม่อีกครั้งนะค่ะ" if lang == "th" else \
+                "😅 I'm not sure what you mean. Could you try rephrasing it?"
+    elif is_closing(user_input):
+        reply = "😊 ยินดีเสมอค่ะ ถ้าต้องการคำแนะนำเพิ่มเติมสามารถถามได้ตลอดเลยนะคะ!" if lang == "th" else \
+                "😊 You're always welcome! Feel free to ask anytime if you need more support!"
     else:
-        with st.spinner("Thinking..."):
-            question_embedding = embedding_model.encode(user_input).tolist()
-            recommendations = retrieve_recommendations(question_embedding, top_k=10)
+        with st.spinner("🧘‍♀️ กำลังคิดคำตอบที่ดีที่สุด..."):
+            embedding = embedding_model.encode(user_input).tolist()
+            recs = retrieve_recommendations(embedding)
 
             prompt = f"""
 User message: "{user_input}"
 
-Step 1: Briefly analyze the user's feelings or situation based on the message above.
-Step 2: Using your analysis and the recommendations below, generate a supportive and practical response.
+Step 1: Briefly analyze the user's feelings or situation.
+Step 2: Using the recommendations below, respond with a short, supportive, and empathetic answer.
 
 Recommendations:
-"""
-            for rec in recommendations:
-                prompt += f"- {rec}\n"
+{chr(10).join(f"- {r}" for r in recs)}
 
-            prompt += f"""
-
-Please respond in {'Thai' if lang == 'th' else 'English'} with a {'polite and warm tone, ending sentences with "ค่ะ"' if lang == 'th' else 'kind and uplifting tone like a supportive female life coach'}.
-
-Your response should:
-- Reflect understanding of the user's feelings or situation.
-- Naturally incorporate relevant recommendations.
-- Avoid repeating the user's exact words or the recommendations verbatim.
-- Be concise (1–2 sentences) and encouraging.
+Please respond in {'Thai' if lang == 'th' else 'English'} with a {'warm and polite female tone, ending sentences with "ค่ะ"' if lang == 'th' else 'kind and supportive female coach tone'}.
+Make sure your message:
+- Reflects understanding of the user.
+- Naturally incorporates useful advice.
+- Feels personal and encouraging.
+- Is concise (1–2 sentences).
 """
 
-            reply = query_llm_with_chat(prompt, api_key)
+            reply = query_llm(prompt, api_key)
 
     st.session_state.chat_history.append({"role": "assistant", "content": reply})
     with st.chat_message("assistant", avatar="🧘‍♀️"):
