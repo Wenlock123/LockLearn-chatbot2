@@ -57,16 +57,18 @@ def query_llm_with_chat(prompt, api_key):
         "max_tokens": 512,
     }
     try:
-        res = requests.post(url, headers=headers, json=payload, timeout=15)
-        if res.status_code == 200:
-            return res.json()["choices"][0]["message"]["content"].strip()
-        else:
-            return f"❌ API Error {res.status_code}: {res.text}"
+        res = requests.post(url, headers=headers, json=payload, timeout=30)
+        res.raise_for_status()
+        return res.json()["choices"][0]["message"]["content"].strip()
+    except requests.exceptions.Timeout:
+        return "❌ Timeout: The response took too long. Please try again later."
+    except requests.exceptions.HTTPError as errh:
+        return f"❌ HTTP Error: {res.status_code} - {res.text}"
     except Exception as e:
         return f"❌ Request failed: {e}"
 
 # --- ส่วนที่ 8: ฟังก์ชันช่วย ---
-def retrieve_recommendations(embedding, top_k=10):
+def retrieve_recommendations(embedding, top_k=5):
     results = collection.query(query_embeddings=[embedding], n_results=top_k)
     return results.get('documents', [[]])[0]
 
@@ -117,15 +119,16 @@ if user_input:
     else:
         with st.spinner("Thinking..."):
             question_embedding = embedding_model.encode(user_input).tolist()
-            recommendations = retrieve_recommendations(question_embedding, top_k=10)
+            recommendations = retrieve_recommendations(question_embedding, top_k=5)
 
             prompt = f"""
 User message: "{user_input}"
 
 Based on the user's message and the recommendations below, please generate a concise, supportive, and practical lifecoach response in {'Thai' if lang == 'th' else 'English'}.
-Your reply should be 1-3 sentences, warm and encouraging {'and end each sentence with "ค่ะ"' if lang == 'th' else 'like a supportive female life coach'}.
+Your reply should be 1–3 sentences, warm and encouraging {'and end each sentence with "ค่ะ"' if lang == 'th' else 'like a supportive female life coach'}.
 Naturally incorporate relevant recommendations without repeating them verbatim.
 Avoid stepwise answers; just give a unified, smooth answer.
+❌ Do NOT use emojis or emoticons in your response.
 
 Recommendations:
 """
